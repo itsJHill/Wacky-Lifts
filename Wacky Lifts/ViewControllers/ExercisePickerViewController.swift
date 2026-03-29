@@ -95,8 +95,10 @@ final class ExercisePickerViewController: UIViewController {
 
     @objc private func doneTapped() {
         let selected = allExercises.filter { selectedIds.contains($0.id) }
-        delegate?.exercisePicker(self, didSelect: selected)
-        dismiss(animated: true)
+        dismiss(animated: true) { [weak self] in
+            guard let self else { return }
+            self.delegate?.exercisePicker(self, didSelect: selected)
+        }
     }
 }
 
