@@ -210,6 +210,9 @@ final class WorkoutEditorViewController: UIViewController, IconPickerViewControl
         tableView.delegate = self
         tableView.dataSource = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "EditorCell")
+        tableView.dragInteractionEnabled = true
+        tableView.dragDelegate = self
+        tableView.dropDelegate = self
 
         view.addSubview(tableView)
 
@@ -662,6 +665,51 @@ extension WorkoutEditorViewController: UITableViewDataSource, UITableViewDelegat
                 IndexSet(integer: Section.exercises.rawValue), with: .automatic)
         })
         present(alert, animated: true)
+    }
+}
+
+// MARK: - UITableViewDragDelegate
+
+extension WorkoutEditorViewController: UITableViewDragDelegate {
+    func tableView(_ tableView: UITableView, itemsForBeginning session: any UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
+        guard indexPath.section == Section.exercises.rawValue,
+              indexPath.row < draftExercises.count else {
+            return []
+        }
+        let item = UIDragItem(itemProvider: NSItemProvider())
+        item.localObject = indexPath
+        return [item]
+    }
+}
+
+// MARK: - UITableViewDropDelegate
+
+extension WorkoutEditorViewController: UITableViewDropDelegate {
+    func tableView(_ tableView: UITableView, dropSessionDidUpdate session: any UIDropSession, withDestinationIndexPath destinationIndexPath: IndexPath?) -> UITableViewDropProposal {
+        guard let dest = destinationIndexPath,
+              dest.section == Section.exercises.rawValue,
+              dest.row < draftExercises.count,
+              session.localDragSession != nil else {
+            return UITableViewDropProposal(operation: .cancel)
+        }
+        return UITableViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+    }
+
+    func tableView(_ tableView: UITableView, performDropWith coordinator: any UITableViewDropCoordinator) {
+        guard let item = coordinator.items.first,
+              let sourceIndexPath = item.dragItem.localObject as? IndexPath,
+              let destinationIndexPath = coordinator.destinationIndexPath,
+              destinationIndexPath.section == Section.exercises.rawValue,
+              destinationIndexPath.row < draftExercises.count else {
+            return
+        }
+
+        tableView.performBatchUpdates {
+            let exercise = draftExercises.remove(at: sourceIndexPath.row)
+            draftExercises.insert(exercise, at: destinationIndexPath.row)
+            tableView.moveRow(at: sourceIndexPath, to: destinationIndexPath)
+        }
+        coordinator.drop(item.dragItem, toRowAt: destinationIndexPath)
     }
 }
 
