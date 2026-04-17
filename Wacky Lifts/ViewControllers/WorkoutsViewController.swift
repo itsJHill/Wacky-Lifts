@@ -29,13 +29,15 @@ final class WorkoutsViewController: UIViewController {
     private nonisolated(unsafe) var exercisesDataSource:
         UITableViewDiffableDataSource<String, ExerciseDefinition>!
 
-    private lazy var exerciseSearchController: UISearchController = {
-        let sc = UISearchController(searchResultsController: nil)
-        sc.searchResultsUpdater = self
-        sc.obscuresBackgroundDuringPresentation = false
-        sc.searchBar.placeholder = "Search exercises"
-        return sc
+    private lazy var exerciseSearchBar: UISearchBar = {
+        let bar = UISearchBar()
+        bar.placeholder = "Search exercises"
+        bar.searchBarStyle = .minimal
+        bar.delegate = self
+        return bar
     }()
+
+    private var isSearchingExercises = false
 
     // MARK: - Nav Bar Items
 
@@ -72,6 +74,41 @@ final class WorkoutsViewController: UIViewController {
         return btn
     }()
 
+    private lazy var searchExercisesButton: UIBarButtonItem = {
+        let btn = UIBarButtonItem(
+            image: UIImage(systemName: "magnifyingglass"),
+            style: .plain,
+            target: self,
+            action: #selector(searchExercisesTapped)
+        )
+        btn.accessibilityLabel = "Search exercises"
+        return btn
+    }()
+
+    private lazy var actionsToggleButton: UIBarButtonItem = {
+        let btn = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.left"),
+            style: .plain,
+            target: self,
+            action: #selector(actionsToggleTapped)
+        )
+        btn.accessibilityLabel = "Show actions"
+        return btn
+    }()
+
+    /// Whether the Exercises-segment right-hand actions (search + add) are
+    /// currently expanded. Collapsed shows just the ellipsis toggle to save
+    /// horizontal room for the centered segmented control.
+    private var isActionsExpanded = false
+
+    private lazy var cancelSearchButton: UIBarButtonItem = {
+        UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(cancelSearchTapped)
+        )
+    }()
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -80,8 +117,6 @@ final class WorkoutsViewController: UIViewController {
         navigationItem.titleView = segmentedControl
 
         definesPresentationContext = true
-        navigationItem.hidesSearchBarWhenScrolling = false
-        navigationItem.preferredSearchBarPlacement = .integrated
 
         configureWorkoutsTableView()
         configureWorkoutsDataSource()
@@ -109,16 +144,80 @@ final class WorkoutsViewController: UIViewController {
 
     private func updateNavBarForSegment() {
         let showingWorkouts = segmentedControl.selectedSegmentIndex == 0
+        // If the user was searching and switched back to Workouts, tear
+        // down the search UI cleanly.
+        if showingWorkouts && isSearchingExercises {
+            exitSearchMode(clearText: true, refreshList: false)
+        }
         if showingWorkouts {
             navigationItem.leftBarButtonItem = categoriesButton
-            navigationItem.rightBarButtonItem = addWorkoutButton
-            exerciseSearchController.isActive = false
-            navigationItem.searchController = nil
+            navigationItem.rightBarButtonItems = [addWorkoutButton]
         } else {
             navigationItem.leftBarButtonItem = nil
-            navigationItem.rightBarButtonItem = addExerciseButton
-            navigationItem.searchController = exerciseSearchController
+            // Order here is right-to-left: the first item in the array is the
+            // rightmost button. The ellipsis toggle stays pinned to the far
+            // right so the user can always reach "collapse"; search and add
+            // only appear when expanded.
+            if isActionsExpanded {
+                navigationItem.rightBarButtonItems = [actionsToggleButton, addExerciseButton, searchExercisesButton]
+            } else {
+                navigationItem.rightBarButtonItems = [actionsToggleButton]
+            }
         }
+    }
+
+    @objc private func actionsToggleTapped() {
+        isActionsExpanded.toggle()
+        actionsToggleButton.image = UIImage(
+            systemName: isActionsExpanded ? "chevron.right" : "chevron.left"
+        )
+        actionsToggleButton.accessibilityLabel = isActionsExpanded
+            ? "Hide actions"
+            : "Show actions"
+        let items: [UIBarButtonItem] = isActionsExpanded
+            ? [actionsToggleButton, addExerciseButton, searchExercisesButton]
+            : [actionsToggleButton]
+        // Animated set gives a native slide-in and lets UIKit reflow the
+        // centered titleView to the left as new items take up space.
+        navigationItem.setRightBarButtonItems(items, animated: true)
+    }
+
+    // MARK: - Search Mode
+
+    @objc private func searchExercisesTapped() {
+        enterSearchMode()
+    }
+
+    @objc private func cancelSearchTapped() {
+        exitSearchMode(clearText: true, refreshList: true)
+    }
+
+    private func enterSearchMode() {
+        guard !isSearchingExercises else { return }
+        isSearchingExercises = true
+        navigationItem.titleView = exerciseSearchBar
+        navigationItem.leftBarButtonItem = nil
+        navigationItem.rightBarButtonItems = [cancelSearchButton]
+        exerciseSearchBar.becomeFirstResponder()
+    }
+
+    private func exitSearchMode(clearText: Bool, refreshList: Bool) {
+        guard isSearchingExercises else { return }
+        isSearchingExercises = false
+        if clearText { exerciseSearchBar.text = "" }
+        exerciseSearchBar.resignFirstResponder()
+        navigationItem.titleView = segmentedControl
+        // Keep the actions group expanded so the user lands back on the
+        // [search, add, collapse] layout they started from — tapping the
+        // chevron is still available if they want to tidy it up.
+        isActionsExpanded = true
+        actionsToggleButton.image = UIImage(systemName: "chevron.right")
+        actionsToggleButton.accessibilityLabel = "Hide actions"
+        // Restore the segment-appropriate bar buttons (the Cancel button was
+        // only meant to live during search mode).
+        updateNavBarForSegment()
+        // Caller decides whether to re-apply the snapshot so filter clears.
+        if refreshList { applyExercisesSnapshot() }
     }
 
     // MARK: - Observations
@@ -304,7 +403,7 @@ final class WorkoutsViewController: UIViewController {
     }
 
     private func applyExercisesSnapshot() {
-        let searchText = exerciseSearchController.searchBar.text ?? ""
+        let searchText = exerciseSearchBar.text ?? ""
         var exercises = exerciseStore.sortedByName()
         if !searchText.isEmpty {
             exercises = exercises.filter {
@@ -444,11 +543,15 @@ extension WorkoutsViewController: ExerciseEditorViewControllerDelegate {
     }
 }
 
-// MARK: - UISearchResultsUpdating
+// MARK: - UISearchBarDelegate
 
-extension WorkoutsViewController: UISearchResultsUpdating {
-    func updateSearchResults(for searchController: UISearchController) {
+extension WorkoutsViewController: UISearchBarDelegate {
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         applyExercisesSnapshot()
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
     }
 }
 
