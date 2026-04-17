@@ -321,6 +321,17 @@ final class CompletionStore {
         notifyChange()
     }
 
+    /// Re-read completions from UserDefaults. Called by `DataBackupManager`
+    /// after import.
+    func reloadFromDisk() {
+        if let stored = userDefaults.stringArray(forKey: completionsKey) {
+            completions = Set(stored)
+        } else {
+            completions = []
+        }
+        notifyChange()
+    }
+
     /// Get workout IDs that had completions on a specific date
     func workoutIdsWithCompletions(on date: Date) -> Set<UUID> {
         let dateString = Self.dateFormatter.string(from: date)

@@ -41,17 +41,20 @@ final class ExerciseStore {
         }
     }
 
-    /// When true, `add` skips saving/notifying — used during migration to batch inserts.
-    private var isBatching = false
+    /// Depth counter so nested `performBatchUpdates` calls don't prematurely end batching.
+    private var batchDepth = 0
+    private var isBatching: Bool { batchDepth > 0 }
 
     /// Perform multiple additions without saving/notifying after each one.
-    /// Saves once and notifies once when the block completes.
+    /// Saves once and notifies once when the outermost block completes.
     func performBatchUpdates(_ block: () -> Void) {
-        isBatching = true
+        batchDepth += 1
         block()
-        isBatching = false
-        save()
-        notifyChange()
+        batchDepth -= 1
+        if batchDepth == 0 {
+            save()
+            notifyChange()
+        }
     }
 
     // MARK: - CRUD
@@ -72,6 +75,7 @@ final class ExerciseStore {
     }
 
     func delete(id: UUID) {
+        ReferenceCleaner.onExerciseDeleted(id)
         exercises.removeAll { $0.id == id }
         save()
         notifyChange()
@@ -89,6 +93,21 @@ final class ExerciseStore {
         notifyChange()
     }
 
+    /// Finds an existing library exercise with the given name (case-insensitive),
+    /// or creates and persists a new one. Consolidates the find-then-add pattern
+    /// so callers (notably the legacy decoder path) can't accidentally introduce
+    /// duplicates by checking and inserting in separate steps.
+    func findOrCreate(name: String, machineId: UUID?) -> Exercise {
+        if let existing = exercises.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) {
+            return existing
+        }
+        let newExercise = Exercise(name: name, machineId: machineId)
+        add(newExercise)
+        return newExercise
+    }
+
     // MARK: - Persistence
 
     private func loadExercises() {
@@ -98,6 +117,13 @@ final class ExerciseStore {
             return
         }
         exercises = decoded
+    }
+
+    /// Re-read exercises from UserDefaults and notify observers. Called by
+    /// `DataBackupManager` after an import.
+    func reloadFromDisk() {
+        loadExercises()
+        notifyChange()
     }
 
     private func save() {

@@ -44,6 +44,7 @@ final class CategoryStore {
     }
 
     func delete(id: UUID) {
+        ReferenceCleaner.onCategoryDeleted(id)
         categories.removeAll { $0.id == id }
         reindex()
     }
@@ -110,5 +111,16 @@ final class CategoryStore {
 
     func resetAll() {
         categories = WorkoutCategory.defaultCategories
+    }
+
+    /// Re-read categories from UserDefaults. The `categories` didSet triggers
+    /// save + notify automatically. Called by `DataBackupManager` after import.
+    func reloadFromDisk() {
+        if let data = userDefaults.data(forKey: categoriesKey),
+           let saved = try? JSONDecoder().decode([WorkoutCategory].self, from: data) {
+            categories = saved
+        } else {
+            categories = WorkoutCategory.defaultCategories
+        }
     }
 }

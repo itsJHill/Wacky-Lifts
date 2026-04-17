@@ -578,6 +578,44 @@ final class StreakStore {
         notifyChange()
     }
 
+    /// Re-read all persisted state from UserDefaults. Called by
+    /// `DataBackupManager` after import so Streaks-tab figures and calendar
+    /// dots reflect the restored data without requiring an app relaunch.
+    func reloadFromDisk() {
+        currentStreak = userDefaults.integer(forKey: currentStreakKey)
+        longestStreak = userDefaults.integer(forKey: longestStreakKey)
+        lastActivityDate = userDefaults.object(forKey: lastActivityDateKey) as? Date
+        totalCompletedExercises = userDefaults.integer(forKey: totalCompletedExercisesKey)
+        totalCompletedWorkouts = userDefaults.integer(forKey: totalCompletedWorkoutsKey)
+        streakMode = StreakMode(rawValue: userDefaults.integer(forKey: streakModeKey)) ?? .perDay
+
+        let savedGoal = userDefaults.integer(forKey: weeklyWorkoutGoalKey)
+        weeklyWorkoutGoal = savedGoal > 0 ? savedGoal : 1
+
+        activeDates = Set(userDefaults.stringArray(forKey: activeDatesKey) ?? [])
+        activeWeeks = Set(userDefaults.stringArray(forKey: activeWeeksKey) ?? [])
+        workoutDates = Set(userDefaults.stringArray(forKey: workoutDatesKey) ?? [])
+
+        if let stored = userDefaults.stringArray(forKey: countedActivityDatesKey) {
+            countedActivityDates = Set(stored)
+        } else {
+            countedActivityDates = activeDates
+        }
+
+        if let stored = userDefaults.stringArray(forKey: countedWorkoutDatesKey) {
+            countedWorkoutDates = Set(stored)
+        } else {
+            countedWorkoutDates = workoutDates
+        }
+
+        weeklyWorkouts = (userDefaults.dictionary(forKey: weeklyWorkoutsKey) as? [String: Int]) ?? [:]
+        exerciseCountsByDate = (userDefaults.dictionary(forKey: exerciseCountsByDateKey) as? [String: Int]) ?? [:]
+
+        repairWeeklyWorkouts()
+        validateStreak()
+        notifyChange()
+    }
+
     func resetStreakOnly() {
         currentStreak = 0
         longestStreak = 0

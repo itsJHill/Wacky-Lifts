@@ -54,6 +54,7 @@ final class SettingsViewController: UIViewController {
     }
 
     deinit {
+        footerResetWorkItem?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -554,12 +555,10 @@ final class SettingsViewController: UIViewController {
 
             let alert = UIAlertController(
                 title: "Import Successful",
-                message: "All data has been restored. The app will now restart to apply changes.",
+                message: "All data has been restored.",
                 preferredStyle: .alert
             )
-            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
-                exit(0)
-            })
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
         } catch {
             let alert = UIAlertController(title: "Import Failed", message: error.localizedDescription, preferredStyle: .alert)

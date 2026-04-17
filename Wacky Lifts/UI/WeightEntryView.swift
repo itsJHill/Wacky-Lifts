@@ -211,7 +211,7 @@ final class WeightEntryView: UIView {
     }
 
     @objc private func confirmTapped() {
-        guard weight > 0 else { return }
+        guard weight.isFinite, weight > 0, weight <= 10_000 else { return }
         isConfirmed = true
         HapticManager.shared.success()
         delegate?.weightEntryView(self, didConfirmWeight: weight, wasModified: wasModified)

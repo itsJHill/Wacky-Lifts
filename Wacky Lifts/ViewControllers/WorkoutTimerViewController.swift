@@ -182,6 +182,11 @@ final class WorkoutTimerViewController: UIViewController {
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
+    deinit {
+        timer?.invalidate()
+        timer = nil
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutRing()
@@ -416,6 +421,10 @@ final class WorkoutTimerViewController: UIViewController {
     }
 
     private func tick() {
+        guard currentStepIndex < steps.count else {
+            stopTimer()
+            return
+        }
         let step = steps[currentStepIndex]
         elapsedTime += 0.05
 

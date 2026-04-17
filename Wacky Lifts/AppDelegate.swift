@@ -46,6 +46,20 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // 5. Re-save templates so they persist in the new format with exerciseId
         store.replaceAll(with: store.templates)
 
+        // 6. Post-condition check: verify the workout library and exercise library
+        //    actually landed on disk. If an upstream step silently failed (e.g. an
+        //    encode error caught by `try?`), leave the migration flag unset so the
+        //    migration is retried on the next launch instead of being marked done
+        //    while the data is still in the legacy format.
+        guard defaults.data(forKey: "workout_library") != nil,
+              defaults.data(forKey: "exercise_library") != nil else {
+            ErrorReporter.shared.report(
+                "Post-condition check failed: workout_library or exercise_library missing from UserDefaults. Migration will retry on next launch.",
+                source: "ExerciseLibraryMigration"
+            )
+            return
+        }
+
         defaults.set(true, forKey: migrationKey)
     }
 

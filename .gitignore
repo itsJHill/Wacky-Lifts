@@ -1,0 +1,60 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode user data and build artifacts
+## User-specific files that should not be shared
+xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+
+## Build products
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcarchive
+
+## Xcode swiftpm caches
+.swiftpm/
+Package.resolved
+
+## Other Xcode generated files
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+Packages/
+.build/
+
+# CocoaPods (not used here, but defensive)
+Pods/
+*.xcworkspace
+
+# Carthage (not used here, but defensive)
+Carthage/Build/
+Carthage/Checkouts/
+
+# fastlane (not used here, but defensive)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~

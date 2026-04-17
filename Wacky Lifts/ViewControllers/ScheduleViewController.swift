@@ -194,7 +194,7 @@ final class ScheduleViewController: UIViewController {
         greetingWorkItem?.cancel()
 
         let originalText = headerLabel.text ?? ""
-        let picked = greetings.randomElement()!
+        guard let picked = greetings.randomElement() else { return }
         let needsQuestion = picked == "Ready" || picked == "What's Good" || picked == "What's Up"
         let greeting = "\(picked), \(name)\(needsQuestion ? "?" : "")"
 
@@ -223,6 +223,8 @@ final class ScheduleViewController: UIViewController {
 
     deinit {
         greetingWorkItem?.cancel()
+        streakCountTimer?.invalidate()
+        streakCountTimer = nil
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -463,6 +465,7 @@ final class ScheduleViewController: UIViewController {
                 tableView: dayTableViews[i]
             ) { [weak self] (tableView: UITableView, indexPath: IndexPath, workout: WorkoutTemplate) in
                 guard let self else { return UITableViewCell() }
+                guard dayIndex >= 0, dayIndex < self.days.count else { return UITableViewCell() }
                 guard let cell = tableView.dequeueReusableCell(
                     withIdentifier: ScheduleWorkoutCell.reuseIdentifier,
                     for: indexPath

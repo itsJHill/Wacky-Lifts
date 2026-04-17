@@ -12,6 +12,7 @@ final class DataBackupManager {
         "workout_library",
         "exercise_library",
         "weekly_schedule",
+        "weekly_schedule_previous",
         "workout_categories",
         "weight_machines",
         "exercise_weight_logs",
@@ -53,7 +54,6 @@ final class DataBackupManager {
     private let boolKeys: [String] = [
         "workout_library_initialized",
         "exercise_library_migrated",
-        "user_name_prompt_shown",
     ]
 
     /// Keys storing Date values:
@@ -158,6 +158,66 @@ final class DataBackupManager {
             throw BackupError.unsupportedVersion
         }
 
+        // Snapshot all managed keys before writing anything. If any step below
+        // throws, we restore the snapshot so the app is never left in a partial
+        // state where referential integrity across stores is broken.
+        let snapshot = captureSnapshot()
+        do {
+            try performImport(backup: backup)
+        } catch {
+            restoreSnapshot(snapshot)
+            throw error
+        }
+
+        // All singleton stores cache state in memory at init time, so after a
+        // successful import they must be told to re-read from UserDefaults.
+        // Without this the running UI keeps showing pre-import data until the
+        // user force-quits the app — and we must never quit programmatically
+        // (App Review Guideline: apps cannot exit themselves).
+        reloadAllStoresFromDisk()
+    }
+
+    /// Order matters only loosely — each reload posts its own change
+    /// notification, and observer VCs are idempotent. Categories and machines
+    /// reload first since templates reference them.
+    private func reloadAllStoresFromDisk() {
+        CategoryStore.shared.reloadFromDisk()
+        MachineStore.shared.reloadFromDisk()
+        ExerciseStore.shared.reloadFromDisk()
+        WorkoutLibraryStore.shared.reloadFromDisk()
+        ScheduleStore.shared.reloadFromDisk()
+        CompletionStore.shared.reloadFromDisk()
+        WeightLogStore.shared.reloadFromDisk()
+        WorkoutSnapshotStore.shared.reloadFromDisk()
+        UserProfileStore.shared.reloadFromDisk()
+        StreakStore.shared.reloadFromDisk()
+    }
+
+    private var allManagedKeys: [String] {
+        jsonDataKeys + stringArrayKeys + stringKeys + integerKeys + boolKeys + dateKeys + stringIntDictKeys
+    }
+
+    private func captureSnapshot() -> [String: Any] {
+        var snapshot: [String: Any] = [:]
+        for key in allManagedKeys {
+            if let value = userDefaults.object(forKey: key) {
+                snapshot[key] = value
+            }
+        }
+        return snapshot
+    }
+
+    private func restoreSnapshot(_ snapshot: [String: Any]) {
+        for key in allManagedKeys {
+            if let value = snapshot[key] {
+                userDefaults.set(value, forKey: key)
+            } else {
+                userDefaults.removeObject(forKey: key)
+            }
+        }
+    }
+
+    private func performImport(backup: [String: Any]) throws {
         // JSON Data keys
         if let section = backup["json_data"] as? [String: String] {
             for (key, base64) in section {

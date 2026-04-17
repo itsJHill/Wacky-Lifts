@@ -7,7 +7,6 @@ final class UserProfileStore {
 
     private let userDefaults = UserDefaults.standard
     private let nameKey = "user_display_name"
-    private let promptShownKey = "user_name_prompt_shown"
 
     var displayName: String? {
         didSet {
@@ -21,19 +20,18 @@ final class UserProfileStore {
         }
     }
 
-    var hasBeenPrompted: Bool {
-        didSet {
-            userDefaults.set(hasBeenPrompted, forKey: promptShownKey)
-        }
-    }
-
     private init() {
         displayName = userDefaults.string(forKey: nameKey)
-        hasBeenPrompted = userDefaults.bool(forKey: promptShownKey)
     }
 
     func reset() {
         displayName = nil
-        hasBeenPrompted = false
+    }
+
+    /// Re-read the stored display name from UserDefaults. The `displayName`
+    /// didSet handles both persistence and the change notification. Called by
+    /// `DataBackupManager` after import.
+    func reloadFromDisk() {
+        displayName = userDefaults.string(forKey: nameKey)
     }
 }

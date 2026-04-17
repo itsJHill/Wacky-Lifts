@@ -7,6 +7,7 @@ final class ScheduleStore {
 
     private let userDefaults = UserDefaults.standard
     private let scheduleKey = "weekly_schedule"
+    private let previousScheduleKey = "weekly_schedule_previous"
     private let weekIdentifierKey = "schedule_week_identifier"
 
     private(set) var schedule: [Weekday: [WorkoutTemplate]] = {
@@ -14,6 +15,13 @@ final class ScheduleStore {
         Weekday.allCases.forEach { map[$0] = [] }
         return map
     }()
+
+    /// Template IDs from disk that didn't resolve against the current library
+    /// (e.g. a partial backup restore where the schedule loaded before the
+    /// workout library). Kept so they can be re-resolved the next time the
+    /// library changes and so they round-trip through `save()` without being
+    /// silently dropped.
+    private var pendingIds: [Weekday: [UUID]] = [:]
 
     private init() {
         loadSchedule()
@@ -82,15 +90,34 @@ final class ScheduleStore {
 
     /// Force refresh all scheduled workouts from the library to get latest data.
     /// Only updates the schedule — does NOT delete historical logs, PRs, or snapshots.
+    /// Also retries any previously-pending template IDs that couldn't be resolved
+    /// at load time; this is the recovery path for out-of-order backup imports.
     func refreshFromLibrary() {
         let library = WorkoutLibraryStore.shared
         var updated: [Weekday: [WorkoutTemplate]] = [:]
+        var stillPending: [Weekday: [UUID]] = [:]
         Weekday.allCases.forEach { day in
             let existing = schedule[day] ?? []
-            let mapped = existing.compactMap { library.template(withId: $0.id) }
+            var mapped = existing.compactMap { library.template(withId: $0.id) }
+
+            if let pending = pendingIds[day] {
+                var unresolved: [UUID] = []
+                for id in pending {
+                    if let template = library.template(withId: id) {
+                        mapped.append(template)
+                    } else {
+                        unresolved.append(id)
+                    }
+                }
+                if !unresolved.isEmpty {
+                    stillPending[day] = unresolved
+                }
+            }
+
             updated[day] = mapped
         }
         schedule = updated
+        pendingIds = stillPending
         save()
         notifyChange()
     }
@@ -125,17 +152,34 @@ final class ScheduleStore {
             let library = WorkoutLibraryStore.shared
 
             var loadedSchedule: [Weekday: [WorkoutTemplate]] = [:]
+            var pending: [Weekday: [UUID]] = [:]
             Weekday.allCases.forEach { loadedSchedule[$0] = [] }
 
             for (weekdayRaw, workoutIds) in savedSchedule.weekdayWorkouts {
                 guard let weekday = Weekday(rawValue: weekdayRaw) else { continue }
-                let workouts = workoutIds.compactMap { library.template(withId: $0) }
-                loadedSchedule[weekday] = workouts
+                var resolved: [WorkoutTemplate] = []
+                var unresolved: [UUID] = []
+                for id in workoutIds {
+                    if let template = library.template(withId: id) {
+                        resolved.append(template)
+                    } else {
+                        unresolved.append(id)
+                    }
+                }
+                loadedSchedule[weekday] = resolved
+                if !unresolved.isEmpty {
+                    pending[weekday] = unresolved
+                    ErrorReporter.shared.report(
+                        "\(unresolved.count) unresolved template ID(s) on \(weekday) — will retry on next library change.",
+                        source: "ScheduleStore.loadSchedule"
+                    )
+                }
             }
 
             schedule = loadedSchedule
+            pendingIds = pending
         } catch {
-            print("Failed to load schedule: \(error)")
+            ErrorReporter.shared.report("Failed to load schedule", source: "ScheduleStore.loadSchedule", error: error)
         }
     }
 
@@ -145,7 +189,13 @@ final class ScheduleStore {
 
         var weekdayWorkouts: [Int: [UUID]] = [:]
         for (weekday, workouts) in schedule {
-            weekdayWorkouts[weekday.rawValue] = workouts.map { $0.id }
+            var ids = workouts.map { $0.id }
+            // Preserve unresolved IDs so they survive save/reload and can be
+            // reattached on the next library change.
+            if let pending = pendingIds[weekday] {
+                ids.append(contentsOf: pending)
+            }
+            weekdayWorkouts[weekday.rawValue] = ids
         }
 
         let savedSchedule = SavedSchedule(weekdayWorkouts: weekdayWorkouts)
@@ -154,19 +204,34 @@ final class ScheduleStore {
             let data = try JSONEncoder().encode(savedSchedule)
             userDefaults.set(data, forKey: scheduleKey)
         } catch {
-            print("Failed to save schedule: \(error)")
+            ErrorReporter.shared.report("Failed to save schedule", source: "ScheduleStore.save", error: error)
         }
     }
 
     private func clearAllData() {
+        // Archive the outgoing schedule before wiping, so a glitched clock or
+        // ISO-week edge case that triggers an unexpected reset doesn't destroy
+        // the user's data outright. The archive is overwritten each reset.
+        if let outgoing = userDefaults.data(forKey: scheduleKey) {
+            userDefaults.set(outgoing, forKey: previousScheduleKey)
+        }
         var emptySchedule: [Weekday: [WorkoutTemplate]] = [:]
         Weekday.allCases.forEach { emptySchedule[$0] = [] }
         schedule = emptySchedule
+        pendingIds = [:]
         userDefaults.removeObject(forKey: scheduleKey)
     }
 
     func resetAll() {
         clearAllData()
+        notifyChange()
+    }
+
+    /// Re-read the schedule from UserDefaults. Called by `DataBackupManager`
+    /// after import so the Schedule tab reflects the restored data without
+    /// requiring an app relaunch.
+    func reloadFromDisk() {
+        loadSchedule()
         notifyChange()
     }
 

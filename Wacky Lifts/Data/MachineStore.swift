@@ -66,6 +66,7 @@ final class MachineStore {
     }
 
     func delete(id: UUID) {
+        ReferenceCleaner.onMachineDeleted(id)
         machines.removeAll { $0.id == id }
         reindex()
     }
@@ -114,5 +115,17 @@ final class MachineStore {
 
     func resetAll() {
         machines = WeightMachine.defaultMachines
+    }
+
+    /// Re-read machines from UserDefaults. The `machines` didSet triggers
+    /// save + notify automatically. Called by `DataBackupManager` after import.
+    func reloadFromDisk() {
+        if let data = userDefaults.data(forKey: machinesKey),
+           let saved = try? JSONDecoder().decode([WeightMachine].self, from: data) {
+            machines = saved
+        } else {
+            machines = WeightMachine.defaultMachines
+        }
+        migrateDefaults()
     }
 }

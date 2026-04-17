@@ -50,6 +50,7 @@ final class WorkoutLibraryStore {
     }
 
     func delete(id: WorkoutTemplate.ID) {
+        ReferenceCleaner.onWorkoutDeleted(id)
         templates.removeAll { $0.id == id }
         save()
         notifyChange()
@@ -74,6 +75,19 @@ final class WorkoutLibraryStore {
     func resetAll() {
         templates = WorkoutLibrary.templates
         save()
+        notifyChange()
+    }
+
+    /// Re-read templates from UserDefaults and notify observers. Called by
+    /// `DataBackupManager` after an import so running view controllers pick
+    /// up the restored data without the app needing to relaunch.
+    func reloadFromDisk() {
+        if let data = userDefaults.data(forKey: libraryKey),
+           let saved = try? JSONDecoder().decode([WorkoutTemplate].self, from: data) {
+            templates = saved
+        } else {
+            templates = WorkoutLibrary.templates
+        }
         notifyChange()
     }
 }

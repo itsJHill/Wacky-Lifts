@@ -589,7 +589,7 @@ final class WeightLogStore {
             let decoded = try JSONDecoder().decode([String: ExerciseLog].self, from: data)
             logs = decoded
         } catch {
-            print("Failed to load weight logs: \(error)")
+            ErrorReporter.shared.report("Failed to load weight logs", source: "WeightLogStore.loadLogs", error: error)
         }
     }
 
@@ -598,7 +598,7 @@ final class WeightLogStore {
             let data = try JSONEncoder().encode(logs)
             userDefaults.set(data, forKey: logsKey)
         } catch {
-            print("Failed to save weight logs: \(error)")
+            ErrorReporter.shared.report("Failed to save weight logs", source: "WeightLogStore.saveLogs", error: error)
         }
     }
 
@@ -609,7 +609,7 @@ final class WeightLogStore {
             let decoded = try JSONDecoder().decode([UUID: ExerciseLog].self, from: data)
             personalRecords = decoded
         } catch {
-            print("Failed to load personal records: \(error)")
+            ErrorReporter.shared.report("Failed to load personal records", source: "WeightLogStore.loadPersonalRecords", error: error)
         }
     }
 
@@ -618,7 +618,7 @@ final class WeightLogStore {
             let data = try JSONEncoder().encode(personalRecords)
             userDefaults.set(data, forKey: "personal_records")
         } catch {
-            print("Failed to save personal records: \(error)")
+            ErrorReporter.shared.report("Failed to save personal records", source: "WeightLogStore.savePersonalRecords", error: error)
         }
     }
 
@@ -629,7 +629,7 @@ final class WeightLogStore {
             let decoded = try JSONDecoder().decode([UUID: ExerciseLog].self, from: data)
             priorPersonalRecords = decoded
         } catch {
-            print("Failed to load prior personal records: \(error)")
+            ErrorReporter.shared.report("Failed to load prior personal records", source: "WeightLogStore.loadPriorPersonalRecords", error: error)
         }
     }
 
@@ -638,7 +638,7 @@ final class WeightLogStore {
             let data = try JSONEncoder().encode(priorPersonalRecords)
             userDefaults.set(data, forKey: "prior_personal_records")
         } catch {
-            print("Failed to save prior personal records: \(error)")
+            ErrorReporter.shared.report("Failed to save prior personal records", source: "WeightLogStore.savePriorPersonalRecords", error: error)
         }
     }
 
@@ -646,6 +646,21 @@ final class WeightLogStore {
         if let stored = userDefaults.stringArray(forKey: prDatesKey) {
             prDates = Set(stored)
         }
+    }
+
+    /// Re-read logs, records, and PR dates from UserDefaults. Called by
+    /// `DataBackupManager` after import so the Streaks / history views pick
+    /// up the restored data without the app needing to relaunch.
+    func reloadFromDisk() {
+        logs = [:]
+        personalRecords = [:]
+        priorPersonalRecords = [:]
+        prDates = []
+        loadLogs()
+        loadPersonalRecords()
+        loadPriorPersonalRecords()
+        loadPRDates()
+        notifyChange()
     }
 
     private func savePRDates() {

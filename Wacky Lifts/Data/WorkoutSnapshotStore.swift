@@ -95,7 +95,7 @@ final class WorkoutSnapshotStore {
             let decoded = try JSONDecoder().decode([String: WorkoutTemplate].self, from: data)
             snapshots = decoded
         } catch {
-            print("Failed to load workout snapshots: \(error)")
+            ErrorReporter.shared.report("Failed to load workout snapshots", source: "WorkoutSnapshotStore.loadSnapshots", error: error)
         }
     }
 
@@ -104,7 +104,7 @@ final class WorkoutSnapshotStore {
             let data = try JSONEncoder().encode(snapshots)
             userDefaults.set(data, forKey: snapshotsKey)
         } catch {
-            print("Failed to save workout snapshots: \(error)")
+            ErrorReporter.shared.report("Failed to save workout snapshots", source: "WorkoutSnapshotStore.saveSnapshots", error: error)
         }
     }
 
@@ -140,5 +140,13 @@ final class WorkoutSnapshotStore {
     func resetAll() {
         snapshots = [:]
         userDefaults.removeObject(forKey: lastCleanupKey)
+    }
+
+    /// Re-read snapshots from UserDefaults. No notification is posted because
+    /// this store has no observers — snapshots are fetched on demand by other
+    /// VCs in response to schedule/completion/library notifications.
+    func reloadFromDisk() {
+        snapshots = [:]
+        loadSnapshots()
     }
 }
