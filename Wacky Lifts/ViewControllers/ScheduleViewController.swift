@@ -24,10 +24,26 @@ final class ScheduleViewController: UIViewController {
 
     private let headerLabel: UILabel = {
         let label = UILabel()
-        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title2)
-        label.font = UIFont.systemFont(ofSize: descriptor.pointSize, weight: .bold)
+        // .title1 + bold trait via font descriptor so Dynamic Type still
+        // scales the header at accessibility sizes. Using size: 0 with the
+        // descriptor preserves the preferred scaled size rather than pinning
+        // it to a fixed point size.
+        let descriptor = UIFontDescriptor
+            .preferredFontDescriptor(withTextStyle: .title1)
+            .withSymbolicTraits(.traitBold)
+            ?? UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title1)
+        label.font = UIFont(descriptor: descriptor, size: 0)
+        label.adjustsFontForContentSizeCategory = true
         label.textColor = .label
         label.isUserInteractionEnabled = true
+        // Long greetings (e.g. "What's Good, Alexandria?") auto-shrink down
+        // to 70% of the base size before truncating. Keeps the greeting on
+        // a single line so it visually replaces the date cleanly.
+        label.numberOfLines = 1
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.7
+        label.lineBreakMode = .byTruncatingTail
+        label.allowsDefaultTighteningForTruncation = true
         return label
     }()
 
@@ -113,8 +129,13 @@ final class ScheduleViewController: UIViewController {
     }()
 
     private let headerBlurView: UIVisualEffectView = {
-        let blur = UIBlurEffect(style: .systemUltraThinMaterial)
-        let view = UIVisualEffectView(effect: blur)
+        // Previously carried a systemUltraThinMaterial blur that layered over
+        // headerBackgroundView. Any blur material has a subtle warm cast
+        // because it simulates thin-glass absorption — with the background
+        // now opaque .secondarySystemBackground, that cast made the week
+        // card read as warmer than the workout cells. Keeping the view in
+        // place for layout stability but with no effect so it's a no-op.
+        let view = UIVisualEffectView(effect: nil)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.layer.cornerRadius = 20
         view.layer.cornerCurve = .continuous
@@ -124,7 +145,9 @@ final class ScheduleViewController: UIViewController {
 
     private let headerBackgroundView: UIView = {
         let view = UIView()
-        view.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.5)
+        // Match the workout cell background so the week card and the workout
+        // group below it read as the same material.
+        view.backgroundColor = .secondarySystemBackground
         view.translatesAutoresizingMaskIntoConstraints = false
         view.layer.cornerRadius = 20
         view.layer.cornerCurve = .continuous
@@ -357,7 +380,7 @@ final class ScheduleViewController: UIViewController {
             addButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             addButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
 
-            weekStripView.heightAnchor.constraint(equalToConstant: 72),
+            weekStripView.heightAnchor.constraint(equalToConstant: 104),
 
             // Paging scroll view extends from top to bottom
             pagingScrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -912,9 +935,10 @@ extension ScheduleViewController: UITableViewDelegate {
             let offsetY = scrollView.contentOffset.y + contentInsetTop
 
             let scrollProgress = min(max(offsetY / 50.0, 0), 1)
-            let backgroundAlpha = 0.6 + (scrollProgress * 0.3)
-            headerBackgroundView.backgroundColor = UIColor.systemBackground.withAlphaComponent(backgroundAlpha)
-
+            // The header background is now an opaque material that matches the
+            // workout cells, so we no longer re-tint it on scroll — only the
+            // drop-shadow intensifies as the user scrolls down, which is enough
+            // visual feedback to separate the pinned header from the content.
             let baseShadow: Float = 0.08
             let additionalShadow: Float = 0.12
             headerContainer.layer.shadowOpacity = baseShadow + Float(scrollProgress) * additionalShadow

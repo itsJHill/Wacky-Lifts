@@ -11,6 +11,12 @@ final class SettingsViewController: UIViewController {
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     private let footerDefaultSuffix = "by jordan"
     private var footerResetWorkItem: DispatchWorkItem?
+
+    /// Max number of characters allowed in the display name. Matches the
+    /// worst-case length of "Test User 123456789" so even long combined
+    /// greetings ("What's Good, Test User 123456789?") fit the header card
+    /// at its shrink-to-fit minimum.
+    fileprivate static let displayNameMaxLength = 19
     
 
     private enum Section: Int, CaseIterable, Hashable, Sendable {
@@ -469,11 +475,23 @@ final class SettingsViewController: UIViewController {
             textField.text = self?.profileStore.displayName
             textField.autocapitalizationType = .words
             textField.returnKeyType = .done
+            if let self {
+                textField.addTarget(
+                    self,
+                    action: #selector(self.enforceDisplayNameLengthLimit(_:)),
+                    for: .editingChanged
+                )
+            }
         }
 
         alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
-            let name = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
-            self?.profileStore.displayName = (name?.isEmpty == false) ? name : nil
+            guard let self else { return }
+            let trimmed = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // Defensive trim in case text bypassed editingChanged (e.g. set
+            // programmatically). Keeps the stored name within the documented
+            // limit even when the UI guard didn't fire.
+            let limited = String(trimmed.prefix(Self.displayNameMaxLength))
+            self.profileStore.displayName = limited.isEmpty ? nil : limited
         })
 
         if profileStore.displayName != nil {
@@ -484,6 +502,16 @@ final class SettingsViewController: UIViewController {
 
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         present(alert, animated: true)
+    }
+
+    @objc fileprivate func enforceDisplayNameLengthLimit(_ textField: UITextField) {
+        guard let text = textField.text, text.count > Self.displayNameMaxLength else { return }
+        // Preserve the user's cursor position as best we can after trimming.
+        let trimmed = String(text.prefix(Self.displayNameMaxLength))
+        textField.text = trimmed
+        if let end = textField.position(from: textField.beginningOfDocument, offset: trimmed.count) {
+            textField.selectedTextRange = textField.textRange(from: end, to: end)
+        }
     }
 
     private func showMachineSetup() {

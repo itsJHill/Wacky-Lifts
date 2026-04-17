@@ -149,20 +149,18 @@ final class WorkoutsViewController: UIViewController {
         if showingWorkouts && isSearchingExercises {
             exitSearchMode(clearText: true, refreshList: false)
         }
-        if showingWorkouts {
-            navigationItem.leftBarButtonItem = categoriesButton
-            navigationItem.rightBarButtonItems = [addWorkoutButton]
+        navigationItem.leftBarButtonItem = nil
+        // Order here is right-to-left: the first item in the array is the
+        // rightmost button. The chevron toggle stays pinned to the far right
+        // so the user can always reach "collapse"; the segment-specific
+        // actions only appear when expanded.
+        let segmentActions: [UIBarButtonItem] = showingWorkouts
+            ? [addWorkoutButton, categoriesButton]
+            : [addExerciseButton, searchExercisesButton]
+        if isActionsExpanded {
+            navigationItem.rightBarButtonItems = [actionsToggleButton] + segmentActions
         } else {
-            navigationItem.leftBarButtonItem = nil
-            // Order here is right-to-left: the first item in the array is the
-            // rightmost button. The ellipsis toggle stays pinned to the far
-            // right so the user can always reach "collapse"; search and add
-            // only appear when expanded.
-            if isActionsExpanded {
-                navigationItem.rightBarButtonItems = [actionsToggleButton, addExerciseButton, searchExercisesButton]
-            } else {
-                navigationItem.rightBarButtonItems = [actionsToggleButton]
-            }
+            navigationItem.rightBarButtonItems = [actionsToggleButton]
         }
     }
 
@@ -174,8 +172,12 @@ final class WorkoutsViewController: UIViewController {
         actionsToggleButton.accessibilityLabel = isActionsExpanded
             ? "Hide actions"
             : "Show actions"
+        let showingWorkouts = segmentedControl.selectedSegmentIndex == 0
+        let segmentActions: [UIBarButtonItem] = showingWorkouts
+            ? [addWorkoutButton, categoriesButton]
+            : [addExerciseButton, searchExercisesButton]
         let items: [UIBarButtonItem] = isActionsExpanded
-            ? [actionsToggleButton, addExerciseButton, searchExercisesButton]
+            ? [actionsToggleButton] + segmentActions
             : [actionsToggleButton]
         // Animated set gives a native slide-in and lets UIKit reflow the
         // centered titleView to the left as new items take up space.
