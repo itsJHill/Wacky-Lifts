@@ -359,6 +359,7 @@ final class StreaksViewController: UIViewController {
         for (index, pr) in prs.prefix(previewCount).enumerated() {
             let row = makePRRow(
                 name: pr.exerciseName,
+                exerciseId: pr.exerciseId,
                 weight: pr.weight,
                 unit: pr.unit,
                 date: dateFormatter.string(from: pr.date)
@@ -441,7 +442,7 @@ final class StreaksViewController: UIViewController {
         }
     }
 
-    private func makePRRow(name: String, weight: Double, unit: WeightUnit, date: String) -> UIView {
+    private func makePRRow(name: String, exerciseId: UUID, weight: Double, unit: WeightUnit, date: String) -> UIView {
         let container = UIView()
 
         let nameLabel = UILabel()
@@ -457,12 +458,8 @@ final class StreaksViewController: UIViewController {
         dateLabel.translatesAutoresizingMaskIntoConstraints = false
 
         // Weight badge on the right
-        let weightText = weight.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", weight)
-            : String(format: "%.1f", weight)
-
         let badgeLabel = UILabel()
-        badgeLabel.text = "\(weightText) \(unit.symbol)"
+        badgeLabel.text = weightLogStore.displayWeight(weight, for: exerciseId, unit: unit)
         badgeLabel.font = UIFont.monospacedDigitSystemFont(
             ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .semibold)
         badgeLabel.textColor = .systemYellow

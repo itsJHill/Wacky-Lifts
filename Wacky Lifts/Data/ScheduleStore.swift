@@ -125,12 +125,7 @@ final class ScheduleStore {
     // MARK: - Persistence
 
     private func currentWeekIdentifier() -> String {
-        var calendar = Calendar(identifier: .iso8601)
-        calendar.firstWeekday = 1 // Sunday
-        let today = Date()
-        let year = calendar.component(.yearForWeekOfYear, from: today)
-        let week = calendar.component(.weekOfYear, from: today)
-        return "\(year)-W\(week)"
+        AppDateCoding.weekIdentifier(for: Date())
     }
 
     private func loadSchedule() {

@@ -291,10 +291,8 @@ final class DayHistoryViewController: UIViewController {
         return card
     }
 
-    private func formatWeight(_ weight: Double) -> String {
-        weight.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", weight)
-            : String(format: "%.1f", weight)
+    private func displayWeight(_ weight: Double, for log: ExerciseLog) -> String {
+        WeightLogStore.shared.displayWeight(weight, for: log.exerciseId, unit: log.unit)
     }
 
     /// Build an attributed string for the set progression, highlighting the PR set(s) in gold.
@@ -305,12 +303,12 @@ final class DayHistoryViewController: UIViewController {
 
         guard let setWeights = log.setWeights, !setWeights.isEmpty else {
             // Legacy single-weight log
-            let text = "\(formatWeight(log.weight)) \(log.unit.symbol)"
-            let color = (log.isPersonalRecord && log.weight > 0) ? prColor : normalColor
+            let text = displayWeight(log.weight, for: log)
+            let color = (log.isPersonalRecord && log.weight != 0) ? prColor : normalColor
             return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
         }
 
-        let maxWeight = setWeights.max() ?? 0
+        let bestWeight = WeightLogStore.shared.bestWeight(from: setWeights, for: log.exerciseId)
         let allSame = Set(setWeights).count == 1
         let result = NSMutableAttributedString()
 
@@ -319,22 +317,19 @@ final class DayHistoryViewController: UIViewController {
             let prefix = "\(setWeights.count) × "
             result.append(NSAttributedString(string: prefix, attributes: [.font: font, .foregroundColor: normalColor]))
 
-            let weightStr = formatWeight(setWeights[0])
-            let weightColor = (log.isPersonalRecord && setWeights[0] == maxWeight) ? prColor : normalColor
+            let weightStr = displayWeight(setWeights[0], for: log)
+            let weightColor = (log.isPersonalRecord && setWeights[0] == bestWeight) ? prColor : normalColor
             result.append(NSAttributedString(string: weightStr, attributes: [.font: font, .foregroundColor: weightColor]))
-
-            result.append(NSAttributedString(string: " \(log.unit.symbol)", attributes: [.font: font, .foregroundColor: normalColor]))
         } else {
-            // "135 → 145 → 155 lbs"
+            // "135 lbs → 145 lbs → 155 lbs"
             for (i, w) in setWeights.enumerated() {
                 if i > 0 {
                     result.append(NSAttributedString(string: " → ", attributes: [.font: font, .foregroundColor: normalColor]))
                 }
-                let weightStr = formatWeight(w)
-                let weightColor = (log.isPersonalRecord && w == maxWeight) ? prColor : normalColor
+                let weightStr = displayWeight(w, for: log)
+                let weightColor = (log.isPersonalRecord && w == bestWeight) ? prColor : normalColor
                 result.append(NSAttributedString(string: weightStr, attributes: [.font: font, .foregroundColor: weightColor]))
             }
-            result.append(NSAttributedString(string: " \(log.unit.symbol)", attributes: [.font: font, .foregroundColor: normalColor]))
         }
 
         return result

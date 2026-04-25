@@ -546,10 +546,12 @@ extension WorkoutEditorViewController: UITableViewDataSource, UITableViewDelegat
                 let isBodyweightExercise = exercise.machineId == WeightMachine.bodyweightId
                 if !isBodyweightExercise {
                     if let pr = weightLogStore.personalRecord(for: exercise.exerciseId) {
-                        let prValue = pr.weight.truncatingRemainder(dividingBy: 1) == 0
-                            ? String(format: "%.0f", pr.weight)
-                            : String(format: "%.1f", pr.weight)
-                        secondaryText += " • PR: \(prValue) \(pr.unit.symbol)"
+                        let prValue = weightLogStore.displayWeight(
+                            pr.weight,
+                            for: exercise.exerciseId,
+                            unit: pr.unit
+                        )
+                        secondaryText += " • PR: \(prValue)"
                     }
                 }
 
@@ -651,7 +653,9 @@ extension WorkoutEditorViewController: UITableViewDataSource, UITableViewDelegat
 
     private func confirmResetPR(for exercise: WorkoutTemplate.Exercise) {
         let currentPR = weightLogStore.personalRecord(for: exercise.exerciseId)
-        let prText = currentPR.map { "\(Int($0.weight)) \($0.unit.symbol)" } ?? "N/A"
+        let prText = currentPR.map {
+            weightLogStore.displayWeight($0.weight, for: exercise.exerciseId, unit: $0.unit)
+        } ?? "N/A"
 
         let alert = UIAlertController(
             title: "Reset PR for \(exercise.name)?",

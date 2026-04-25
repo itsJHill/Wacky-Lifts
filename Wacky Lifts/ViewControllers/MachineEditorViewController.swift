@@ -7,6 +7,7 @@ protocol MachineEditorViewControllerDelegate: AnyObject {
 final class MachineEditorViewController: UIViewController {
     private enum Section: Int, CaseIterable {
         case name
+        case behavior
         case quickFill
         case weights
     }
@@ -18,6 +19,7 @@ final class MachineEditorViewController: UIViewController {
 
     private var draftName: String
     private var draftWeights: [Double]
+    private var draftProgressionKind: WeightProgressionKind
 
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
 
@@ -26,10 +28,19 @@ final class MachineEditorViewController: UIViewController {
     private var quickSecondIncrement: String = ""
     private var quickMax: String = "200"
 
+    private var includesUnassisted: Bool {
+        draftProgressionKind == .lowerIsBetter
+    }
+
+    private var visibleWeightRowCount: Int {
+        draftWeights.count + (includesUnassisted ? 1 : 0)
+    }
+
     init(machine: WeightMachine? = nil) {
         self.existingMachine = machine
         self.draftName = machine?.name ?? ""
         self.draftWeights = machine?.weights ?? []
+        self.draftProgressionKind = machine?.progressionKind ?? .higherIsBetter
         super.init(nibName: nil, bundle: nil)
         self.title = machine != nil ? "Edit Machine" : "New Machine"
     }
@@ -95,12 +106,17 @@ final class MachineEditorViewController: UIViewController {
             return
         }
 
-        let sortedWeights = draftWeights.sorted()
+        let sortedWeights = draftWeights.filter { $0 > 0 }.sorted()
 
         if let existing = existingMachine {
-            store.update(id: existing.id, name: trimmedName, weights: sortedWeights)
+            store.update(
+                id: existing.id,
+                name: trimmedName,
+                weights: sortedWeights,
+                progressionKind: draftProgressionKind
+            )
         } else {
-            store.add(name: trimmedName, weights: sortedWeights)
+            store.add(name: trimmedName, weights: sortedWeights, progressionKind: draftProgressionKind)
         }
 
         delegate?.machineEditorDidSave(self)
@@ -144,7 +160,8 @@ final class MachineEditorViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self] _ in
             guard let self,
                   let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  let value = Double(text) else { return }
+                  let value = Double(text),
+                  value > 0 else { return }
             self.draftWeights.append(value)
             self.draftWeights.sort()
             self.tableView.reloadSections(IndexSet(integer: Section.weights.rawValue), with: .automatic)
@@ -164,8 +181,9 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
         guard let s = Section(rawValue: section) else { return 0 }
         switch s {
         case .name: return 1
+        case .behavior: return 1
         case .quickFill: return 4  // increment, 2nd increment, max, generate button
-        case .weights: return draftWeights.count + 1  // weights + "Add Weight" row
+        case .weights: return visibleWeightRowCount + 1  // weights + "Add Weight" row
         }
     }
 
@@ -173,16 +191,24 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
         guard let s = Section(rawValue: section) else { return nil }
         switch s {
         case .name: return "Name"
+        case .behavior: return "Weight Behavior"
         case .quickFill: return "Quick Fill"
-        case .weights: return "Weight Positions (\(draftWeights.count))"
+        case .weights:
+            return includesUnassisted
+                ? "Weight Positions (Unassisted + \(draftWeights.count))"
+                : "Weight Positions (\(draftWeights.count))"
         }
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         guard let s = Section(rawValue: section) else { return nil }
         switch s {
+        case .behavior:
+            return draftProgressionKind.description
         case .quickFill:
-            return "Enter an increment and max to auto-generate positions. Add a second increment for alternating machines (e.g., cable stacks with 2/3 patterns)."
+            return draftProgressionKind == .lowerIsBetter
+                ? "Enter positive assistance values. Unassisted is included automatically."
+                : "Enter an increment and max to auto-generate positions. Add a second increment for alternating machines (e.g., cable stacks with 2/3 patterns)."
         case .weights:
             return draftWeights.isEmpty ? nil : "Swipe to delete individual positions, or use Quick Fill to regenerate."
         default:
@@ -212,6 +238,16 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
             field.autocapitalizationType = .words
             field.addTarget(self, action: #selector(nameFieldChanged(_:)), for: .editingChanged)
             embedTextField(field, in: cell)
+
+        case .behavior:
+            var content = UIListContentConfiguration.valueCell()
+            content.text = "Behavior"
+            content.secondaryText = draftProgressionKind.shortTitle
+            content.image = UIImage(systemName: draftProgressionKind == .lowerIsBetter ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+            content.imageProperties.tintColor = draftProgressionKind == .lowerIsBetter ? .systemPurple : .systemBlue
+            cell.contentConfiguration = content
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
 
         case .quickFill:
             switch indexPath.row {
@@ -255,8 +291,16 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
             }
 
         case .weights:
-            if indexPath.row < draftWeights.count {
-                let weight = draftWeights[indexPath.row]
+            if includesUnassisted && indexPath.row == 0 {
+                var content = UIListContentConfiguration.cell()
+                content.text = "Unassisted"
+                content.secondaryText = "Included automatically"
+                content.image = UIImage(systemName: "figure.strengthtraining.traditional")
+                content.imageProperties.tintColor = .systemPurple
+                cell.contentConfiguration = content
+            } else if indexPath.row < visibleWeightRowCount {
+                let weightIndex = indexPath.row - (includesUnassisted ? 1 : 0)
+                let weight = draftWeights[weightIndex]
                 var content = UIListContentConfiguration.cell()
                 let formatted = weight.truncatingRemainder(dividingBy: 1) == 0
                     ? String(format: "%.0f", weight) : String(format: "%.1f", weight)
@@ -284,12 +328,14 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
         guard let section = Section(rawValue: indexPath.section) else { return }
 
         switch section {
+        case .behavior:
+            showBehaviorPicker()
         case .quickFill:
             if indexPath.row == 3 {
                 generateTapped()
             }
         case .weights:
-            if indexPath.row >= draftWeights.count {
+            if indexPath.row >= visibleWeightRowCount {
                 promptAddWeight()
             }
         default:
@@ -299,15 +345,19 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
 
     func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
         guard let section = Section(rawValue: indexPath.section) else { return false }
-        return section == .weights && indexPath.row < draftWeights.count
+        return section == .weights
+            && indexPath.row >= (includesUnassisted ? 1 : 0)
+            && indexPath.row < visibleWeightRowCount
     }
 
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         guard editingStyle == .delete,
               let section = Section(rawValue: indexPath.section),
               section == .weights,
-              indexPath.row < draftWeights.count else { return }
-        draftWeights.remove(at: indexPath.row)
+              indexPath.row < visibleWeightRowCount else { return }
+        let weightIndex = indexPath.row - (includesUnassisted ? 1 : 0)
+        guard weightIndex >= 0, weightIndex < draftWeights.count else { return }
+        draftWeights.remove(at: weightIndex)
         tableView.deleteRows(at: [indexPath], with: .automatic)
         // Reload header to update count
         tableView.reloadSections(IndexSet(integer: Section.weights.rawValue), with: .none)
@@ -350,6 +400,24 @@ extension MachineEditorViewController: UITableViewDataSource, UITableViewDelegat
 
     @objc private func nameFieldChanged(_ sender: UITextField) {
         draftName = sender.text ?? ""
+    }
+
+    private func showBehaviorPicker() {
+        let alert = UIAlertController(title: "Weight Behavior", message: nil, preferredStyle: .actionSheet)
+        for kind in WeightProgressionKind.allCases {
+            let title = kind == draftProgressionKind ? "\(kind.title) ✓" : kind.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.draftProgressionKind = kind
+                self?.tableView.reloadData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            popover.permittedArrowDirections = []
+        }
+        present(alert, animated: true)
     }
 
     @objc private func incrementFieldChanged(_ sender: UITextField) {

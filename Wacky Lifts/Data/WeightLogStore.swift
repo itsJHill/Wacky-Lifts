@@ -55,9 +55,7 @@ final class WeightLogStore {
     }
 
     private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
+        AppDateCoding.makeDateKeyFormatter()
     }()
 
     private init() {
@@ -136,33 +134,13 @@ final class WeightLogStore {
         var updatedLogs = logs.filter { !$0.key.hasPrefix(prefix) }
         var updatedRecords = personalRecords
         var updatedPRDates = prDates
-
-        for exerciseId in affectedExerciseIds {
-            let remainingLogs = updatedLogs.values
-                .filter { $0.exerciseId == exerciseId && $0.weight > 0 }
-                .sorted { $0.weight > $1.weight }
-
-            if let bestLog = remainingLogs.first {
-                let newPR = bestLog.withPersonalRecord(true)
-                let logKey = key(for: newPR.entryId, in: newPR.workoutId, on: newPR.date)
-                updatedLogs[logKey] = newPR
-                updatedRecords[exerciseId] = newPR
-
-                let prDateString = Self.dateFormatter.string(from: newPR.date)
-                updatedPRDates.insert(prDateString)
-            } else {
-                updatedRecords.removeValue(forKey: exerciseId)
-            }
-        }
-
-        for prDate in affectedPRDates {
-            let hasRemainingPR = updatedLogs.values.contains { log in
-                log.isPersonalRecord && Self.dateFormatter.string(from: log.date) == prDate
-            }
-            if !hasRemainingPR {
-                updatedPRDates.remove(prDate)
-            }
-        }
+        recalculatePersonalRecords(
+            for: affectedExerciseIds,
+            affectedPRDates: affectedPRDates,
+            in: &updatedLogs,
+            records: &updatedRecords,
+            prDates: &updatedPRDates
+        )
 
         logs = updatedLogs
         personalRecords = updatedRecords
@@ -190,33 +168,13 @@ final class WeightLogStore {
         var updatedLogs = logs.filter { !$0.key.hasPrefix(dateString) }
         var updatedRecords = personalRecords
         var updatedPRDates = prDates
-
-        for exerciseId in affectedExerciseIds {
-            let remainingLogs = updatedLogs.values
-                .filter { $0.exerciseId == exerciseId && $0.weight > 0 }
-                .sorted { $0.weight > $1.weight }
-
-            if let bestLog = remainingLogs.first {
-                let newPR = bestLog.withPersonalRecord(true)
-                let logKey = key(for: newPR.entryId, in: newPR.workoutId, on: newPR.date)
-                updatedLogs[logKey] = newPR
-                updatedRecords[exerciseId] = newPR
-
-                let prDateString = Self.dateFormatter.string(from: newPR.date)
-                updatedPRDates.insert(prDateString)
-            } else {
-                updatedRecords.removeValue(forKey: exerciseId)
-            }
-        }
-
-        for prDate in affectedPRDates {
-            let hasRemainingPR = updatedLogs.values.contains { log in
-                log.isPersonalRecord && Self.dateFormatter.string(from: log.date) == prDate
-            }
-            if !hasRemainingPR {
-                updatedPRDates.remove(prDate)
-            }
-        }
+        recalculatePersonalRecords(
+            for: affectedExerciseIds,
+            affectedPRDates: affectedPRDates,
+            in: &updatedLogs,
+            records: &updatedRecords,
+            prDates: &updatedPRDates
+        )
 
         logs = updatedLogs
         personalRecords = updatedRecords
@@ -239,6 +197,32 @@ final class WeightLogStore {
 
     func personalRecord(for exerciseId: UUID) -> ExerciseLog? {
         personalRecords[exerciseId]
+    }
+
+    func progressionKind(for exerciseId: UUID) -> WeightProgressionKind {
+        machine(for: exerciseId)?.progressionKind ?? .higherIsBetter
+    }
+
+    func displayWeight(_ weight: Double, for exerciseId: UUID, unit: WeightUnit) -> String {
+        if weight < 0 {
+            return "Unassisted"
+        }
+        if let machine = machine(for: exerciseId) {
+            return machine.displayText(for: weight, unit: unit)
+        }
+        return Self.formatWeight(weight, unit: unit)
+    }
+
+    func bestWeight(from setWeights: [Double], for exerciseId: UUID) -> Double {
+        let validWeights = setWeights.filter { isValidLogWeight($0, for: exerciseId) }
+        guard !validWeights.isEmpty else { return 0 }
+
+        switch progressionKind(for: exerciseId) {
+        case .higherIsBetter:
+            return validWeights.max() ?? 0
+        case .lowerIsBetter:
+            return validWeights.min() ?? 0
+        }
     }
 
     /// All current personal records, sorted by date (most recent first)
@@ -294,14 +278,34 @@ final class WeightLogStore {
     }
 
     func isPersonalRecord(exerciseId: UUID, weight: Double) -> Bool {
-        guard weight > 0 else { return false }
+        guard isValidLogWeight(weight, for: exerciseId) else { return false }
 
         guard let currentPR = personalRecords[exerciseId] else {
             return true // First log is always a PR
         }
 
-        // PR if weight is higher than current PR
-        return weight > currentPR.weight
+        return isBetter(candidate: weight, than: currentPR.weight, for: exerciseId)
+    }
+
+    func recalculatePersonalRecords(for exerciseIds: Set<UUID>) {
+        guard !exerciseIds.isEmpty else { return }
+
+        capturePriorPRs(for: exerciseIds)
+
+        var updatedLogs = logs
+        var updatedRecords = personalRecords
+        var updatedPRDates = prDates
+        recalculatePersonalRecords(
+            for: exerciseIds,
+            in: &updatedLogs,
+            records: &updatedRecords,
+            prDates: &updatedPRDates
+        )
+
+        logs = updatedLogs
+        personalRecords = updatedRecords
+        prDates = updatedPRDates
+        notifyChange()
     }
 
     /// Reset the PR for a specific exercise
@@ -310,47 +314,63 @@ final class WeightLogStore {
         notifyChange()
     }
 
-    /// Delete all logs for specific exercise entries within a workout and recalculate PRs
-    func deleteLogsForExercises(_ entryIds: Set<UUID>, in workoutId: UUID) {
-        guard !entryIds.isEmpty else { return }
+    private func machine(for exerciseId: UUID) -> WeightMachine? {
+        guard let machineId = ExerciseStore.shared.exercise(for: exerciseId)?.machineId else { return nil }
+        return MachineStore.shared.machine(for: machineId)
+    }
 
-        var affectedPRDates = Set<String>()
-        let removedKeys = logs.filter { _, log in
-            log.workoutId == workoutId && entryIds.contains(log.entryId)
+    private func isValidLogWeight(_ weight: Double, for exerciseId: UUID) -> Bool {
+        if let machine = machine(for: exerciseId) {
+            return machine.isValidLogWeight(weight)
         }
-        guard !removedKeys.isEmpty else { return }
+        return weight > 0
+    }
 
-        var affectedExerciseIds = Set<UUID>()
-        for (_, log) in removedKeys {
-            affectedExerciseIds.insert(log.exerciseId)
-            if log.isPersonalRecord {
-                let dateString = Self.dateFormatter.string(from: log.date)
-                affectedPRDates.insert(dateString)
+    private func isBetter(candidate: Double, than current: Double, for exerciseId: UUID) -> Bool {
+        guard isValidLogWeight(candidate, for: exerciseId) else { return false }
+        guard isValidLogWeight(current, for: exerciseId) else { return true }
+
+        switch progressionKind(for: exerciseId) {
+        case .higherIsBetter:
+            return candidate > current
+        case .lowerIsBetter:
+            return candidate < current
+        }
+    }
+
+    private func bestLog(for exerciseId: UUID, from candidateLogs: [ExerciseLog]) -> ExerciseLog? {
+        candidateLogs
+            .filter { $0.exerciseId == exerciseId && isValidLogWeight($0.weight, for: exerciseId) }
+            .sorted { lhs, rhs in
+                if lhs.weight == rhs.weight { return lhs.date > rhs.date }
+                return isBetter(candidate: lhs.weight, than: rhs.weight, for: exerciseId)
             }
+            .first
+    }
+
+    private func recalculatePersonalRecords(
+        for exerciseIds: Set<UUID>,
+        affectedPRDates additionalAffectedPRDates: Set<String> = [],
+        in updatedLogs: inout [String: ExerciseLog],
+        records updatedRecords: inout [UUID: ExerciseLog],
+        prDates updatedPRDates: inout Set<String>
+    ) {
+        var affectedPRDates = additionalAffectedPRDates
+
+        for (logKey, log) in updatedLogs where exerciseIds.contains(log.exerciseId) {
+            if log.isPersonalRecord {
+                affectedPRDates.insert(Self.dateFormatter.string(from: log.date))
+            }
+            updatedLogs[logKey] = log.withPersonalRecord(false)
         }
 
-        capturePriorPRs(for: affectedExerciseIds)
-
-        var updatedLogs = logs
-        for key in removedKeys.keys {
-            updatedLogs.removeValue(forKey: key)
-        }
-
-        var updatedRecords = personalRecords
-        var updatedPRDates = prDates
-
-        for exerciseId in affectedExerciseIds {
-            let remainingLogs = updatedLogs.values
-                .filter { $0.exerciseId == exerciseId && $0.weight > 0 }
-                .sorted { $0.weight > $1.weight }
-
-            if let bestLog = remainingLogs.first {
+        for exerciseId in exerciseIds {
+            if let bestLog = bestLog(for: exerciseId, from: Array(updatedLogs.values)) {
                 let newPR = bestLog.withPersonalRecord(true)
                 let logKey = key(for: newPR.entryId, in: newPR.workoutId, on: newPR.date)
                 updatedLogs[logKey] = newPR
                 updatedRecords[exerciseId] = newPR
-                let prDateString = Self.dateFormatter.string(from: newPR.date)
-                updatedPRDates.insert(prDateString)
+                updatedPRDates.insert(Self.dateFormatter.string(from: newPR.date))
             } else {
                 updatedRecords.removeValue(forKey: exerciseId)
             }
@@ -364,6 +384,49 @@ final class WeightLogStore {
                 updatedPRDates.remove(prDate)
             }
         }
+    }
+
+    private static func formatWeight(_ weight: Double, unit: WeightUnit) -> String {
+        let formatted = weight.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", weight)
+            : String(format: "%.1f", weight)
+        return "\(formatted) \(unit.symbol)"
+    }
+
+    /// Delete all logs for specific exercise entries within a workout and recalculate PRs
+    func deleteLogsForExercises(_ entryIds: Set<UUID>, in workoutId: UUID) {
+        guard !entryIds.isEmpty else { return }
+
+        let removedKeys = logs.filter { _, log in
+            log.workoutId == workoutId && entryIds.contains(log.entryId)
+        }
+        guard !removedKeys.isEmpty else { return }
+
+        var affectedExerciseIds = Set<UUID>()
+        var affectedPRDates = Set<String>()
+        for (_, log) in removedKeys {
+            affectedExerciseIds.insert(log.exerciseId)
+            if log.isPersonalRecord {
+                affectedPRDates.insert(Self.dateFormatter.string(from: log.date))
+            }
+        }
+
+        capturePriorPRs(for: affectedExerciseIds)
+
+        var updatedLogs = logs
+        for key in removedKeys.keys {
+            updatedLogs.removeValue(forKey: key)
+        }
+
+        var updatedRecords = personalRecords
+        var updatedPRDates = prDates
+        recalculatePersonalRecords(
+            for: affectedExerciseIds,
+            affectedPRDates: affectedPRDates,
+            in: &updatedLogs,
+            records: &updatedRecords,
+            prDates: &updatedPRDates
+        )
 
         logs = updatedLogs
         personalRecords = updatedRecords
@@ -376,12 +439,10 @@ final class WeightLogStore {
         // 1. Find affected exercises and dates that had PRs
         var affectedExerciseIds = Set<UUID>()
         var affectedPRDates = Set<String>()
-
         for (_, log) in logs where log.workoutId == workoutId {
             affectedExerciseIds.insert(log.exerciseId)
             if log.isPersonalRecord {
-                let dateString = Self.dateFormatter.string(from: log.date)
-                affectedPRDates.insert(dateString)
+                affectedPRDates.insert(Self.dateFormatter.string(from: log.date))
             }
         }
 
@@ -395,34 +456,13 @@ final class WeightLogStore {
         // 3. For each affected exercise, find the next-best PR from remaining logs
         var updatedRecords = personalRecords
         var updatedPRDates = prDates
-
-        for exerciseId in affectedExerciseIds {
-            let remainingLogs = updatedLogs.values
-                .filter { $0.exerciseId == exerciseId && $0.weight > 0 }
-                .sorted { $0.weight > $1.weight }
-
-            if let bestLog = remainingLogs.first {
-                let newPR = bestLog.withPersonalRecord(true)
-                let logKey = key(for: newPR.entryId, in: newPR.workoutId, on: newPR.date)
-                updatedLogs[logKey] = newPR
-                updatedRecords[exerciseId] = newPR
-
-                let dateString = Self.dateFormatter.string(from: newPR.date)
-                updatedPRDates.insert(dateString)
-            } else {
-                updatedRecords.removeValue(forKey: exerciseId)
-            }
-        }
-
-        // 4. Clean up PR dates where no remaining log is a PR
-        for dateString in affectedPRDates {
-            let hasRemainingPR = updatedLogs.values.contains { log in
-                log.isPersonalRecord && Self.dateFormatter.string(from: log.date) == dateString
-            }
-            if !hasRemainingPR {
-                updatedPRDates.remove(dateString)
-            }
-        }
+        recalculatePersonalRecords(
+            for: affectedExerciseIds,
+            affectedPRDates: affectedPRDates,
+            in: &updatedLogs,
+            records: &updatedRecords,
+            prDates: &updatedPRDates
+        )
 
         // 5. Apply all changes
         logs = updatedLogs
@@ -471,7 +511,7 @@ final class WeightLogStore {
 
     /// Get all PR dates in a given month
     func prDates(in month: Date) -> [Date] {
-        let calendar = Calendar.current
+        let calendar = AppDateCoding.calendar
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
             return []
         }
@@ -498,7 +538,7 @@ final class WeightLogStore {
 
     /// Get dates with weight logs in a given month
     func logDates(in month: Date) -> [Date] {
-        let calendar = Calendar.current
+        let calendar = AppDateCoding.calendar
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
             return []
         }
@@ -538,45 +578,19 @@ final class WeightLogStore {
             migratedLogs[logKey] = migratedLog
         }
 
-        // Merge PRs: re-key by library exercise ID, keep highest weight
-        var migratedPRs: [UUID: ExerciseLog] = [:]
-        for (oldId, pr) in personalRecords {
-            let libraryId = mapping[oldId] ?? oldId
-            if let existing = migratedPRs[libraryId] {
-                if pr.weight > existing.weight {
-                    migratedPRs[libraryId] = ExerciseLog(
-                        id: pr.id,
-                        entryId: pr.entryId,
-                        exerciseId: libraryId,
-                        exerciseName: pr.exerciseName,
-                        workoutId: pr.workoutId,
-                        date: pr.date,
-                        weight: pr.weight,
-                        reps: pr.reps,
-                        unit: pr.unit,
-                        isPersonalRecord: true,
-                        setWeights: pr.setWeights
-                    )
-                }
-            } else {
-                migratedPRs[libraryId] = ExerciseLog(
-                    id: pr.id,
-                    entryId: pr.entryId,
-                    exerciseId: libraryId,
-                    exerciseName: pr.exerciseName,
-                    workoutId: pr.workoutId,
-                    date: pr.date,
-                    weight: pr.weight,
-                    reps: pr.reps,
-                    unit: pr.unit,
-                    isPersonalRecord: true,
-                    setWeights: pr.setWeights
-                )
-            }
-        }
+        var migratedRecords: [UUID: ExerciseLog] = [:]
+        var migratedPRDates = prDates
+        var normalizedLogs = migratedLogs
+        recalculatePersonalRecords(
+            for: Set(migratedLogs.values.map(\.exerciseId)),
+            in: &normalizedLogs,
+            records: &migratedRecords,
+            prDates: &migratedPRDates
+        )
 
-        logs = migratedLogs
-        personalRecords = migratedPRs
+        logs = normalizedLogs
+        personalRecords = migratedRecords
+        prDates = migratedPRDates
         priorPersonalRecords = [:]
     }
 
@@ -670,7 +684,7 @@ final class WeightLogStore {
     // MARK: - Cleanup (3-month retention)
 
     private func cleanupOldLogsIfNeeded() {
-        let calendar = Calendar.current
+        let calendar = AppDateCoding.calendar
         let today = Date()
 
         // Only cleanup once per week

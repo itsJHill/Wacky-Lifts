@@ -352,7 +352,7 @@ final class SettingsViewController: UIViewController {
         for log in logs {
             let workoutName = libraryStore.template(withId: log.workoutId)?.name ?? ""
             let dateString = formatter.string(from: log.date)
-            let weightString = formatWeight(log.weight, isPersonalBest: log.isPersonalRecord)
+            let weightString = formatWeight(log.weight, for: log, isPersonalBest: log.isPersonalRecord)
             let progression = progressionString(for: log)
             let row = [dateString, workoutName, log.exerciseName, weightString, progression]
                 .map(csvField)
@@ -365,10 +365,10 @@ final class SettingsViewController: UIViewController {
 
     private func progressionString(for log: ExerciseLog) -> String {
         guard let setWeights = log.setWeights, !setWeights.isEmpty else { return "" }
-        let maxWeight = setWeights.max() ?? 0
+        let bestWeight = weightLogStore.bestWeight(from: setWeights, for: log.exerciseId)
         let parts = setWeights.map { weight -> String in
-            var value = formatWeight(weight)
-            if log.isPersonalRecord && weight == maxWeight && weight > 0 {
+            var value = formatWeight(weight, for: log)
+            if log.isPersonalRecord && weight == bestWeight && bestWeight != 0 {
                 value += " (PB)"
             }
             return value
@@ -376,11 +376,9 @@ final class SettingsViewController: UIViewController {
         return parts.joined(separator: "->")
     }
 
-    private func formatWeight(_ weight: Double, isPersonalBest: Bool = false) -> String {
-        let formatted = weight.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", weight)
-            : String(format: "%.1f", weight)
-        if isPersonalBest && weight > 0 {
+    private func formatWeight(_ weight: Double, for log: ExerciseLog, isPersonalBest: Bool = false) -> String {
+        let formatted = weightLogStore.displayWeight(weight, for: log.exerciseId, unit: log.unit)
+        if isPersonalBest && weight != 0 {
             return "\(formatted) (PB)"
         }
         return formatted

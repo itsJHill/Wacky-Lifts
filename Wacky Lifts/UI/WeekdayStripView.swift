@@ -21,7 +21,7 @@ public final class WeekdayStripView: UIView {
 
     public var onSelectionChanged: ((Selection) -> Void)?
 
-    private let calendar = Calendar.current
+    private let calendar = AppDateCoding.calendar
     private var days: [Day] = []
     private var selectedIndex: Int = 0
 
@@ -71,12 +71,12 @@ public final class WeekdayStripView: UIView {
         // selection pill (which tracks button frame) scales up with the
         // strip's height constraint.
         view.alignment = .fill
-        // `.fillProportionally` sizes each button by its intrinsic content,
-        // so when the selected day's title is magnified the button naturally
-        // takes more horizontal room and the unselected days compress —
-        // leaving breathing space around the magnified date without it
-        // wrapping to two lines like `Wed` → `We / d`.
-        view.distribution = .fillProportionally
+        // `.fillEqually` keeps all button frames identical — so when the
+        // selection moves, only the pill animates; button widths don't
+        // reflow and drag neighbors around. Proportional sizing was
+        // previously tried, but it made intermediate days "fly" during
+        // the cross-strip animation.
+        view.distribution = .fillEqually
         return view
     }()
 
@@ -195,7 +195,11 @@ public final class WeekdayStripView: UIView {
     }
 
     private func makeButton(for day: Day, index: Int) -> UIButton {
-        let button = UIButton(type: .system)
+        // `.custom` instead of `.system` — the system button type fades its
+        // title on tap, which reads as a visible "blink" when combined with
+        // the selection pill's spring animation. With custom, the pill
+        // movement provides the tap feedback on its own.
+        let button = UIButton(type: .custom)
         button.tag = index
 
         // Use Dynamic Type with UIFontMetrics for accessibility scaling.
@@ -281,55 +285,48 @@ public final class WeekdayStripView: UIView {
     }
 
     private func updateSelectionStyles(animated: Bool) {
-        // Order matters: swap the button fonts FIRST so .fillProportionally
-        // reflows widths based on the new intrinsic content sizes, then let
-        // the stack re-layout, THEN position the pill. If the pill is
-        // positioned before the relayout it ends up centered on the OLD
-        // (narrower) frame of the selected button and looks visibly offset
-        // once the selected button grows to its magnified size.
-        self.updateButtonMagnification()
-        self.stackView.setNeedsLayout()
-        self.stackView.layoutIfNeeded()
-        self.blurView.contentView.layoutIfNeeded()
-        self.updateSelectionIndicatorFrame(animated: animated)
+        // With .fillEqually distribution, button frames are fixed — only the
+        // pill needs to animate. The font swap happens instantly on all
+        // buttons inside performWithoutAnimation so UIButton.Configuration
+        // doesn't run its own crossfade, but that's now the only layout
+        // change happening and it's invisible under the moving pill.
+        updateButtonMagnification()
+        updateSelectionIndicatorFrame(animated: animated)
     }
 
-    /// Swaps the selected day button's title font for a larger one and
-    /// restores the base font on the others. Uses a font-swap rather than a
-    /// CGAffineTransform because UIButton.Configuration recalculates its
-    /// title frame based on the label's intrinsic size — transforming the
-    /// label breaks the second line ("17") from being measured, which
-    /// caused it to vanish entirely from the rendered button.
+    /// Applies a bold-weight trait to the selected day's title (via the
+    /// applyTitle helper) and scales the whole selected button up visually
+    /// via CGAffineTransform. Because button.frame stays fixed and only
+    /// the visual transform changes, neighbors don't reflow and there's
+    /// no competing layout animation with the pill.
     private func updateButtonMagnification() {
+        UIView.performWithoutAnimation {
+            for (index, button) in buttons.enumerated() {
+                button.titleLabel?.transform = .identity
+                applyTitle(to: button, at: index, magnified: index == selectedIndex)
+            }
+        }
         for (index, button) in buttons.enumerated() {
-            // Defensive: clear any stale transform from earlier versions.
-            button.titleLabel?.transform = .identity
-            applyTitle(to: button, at: index, magnified: index == selectedIndex)
+            let scale: CGFloat = index == selectedIndex ? Self.selectedScale : 1.0
+            button.transform = CGAffineTransform(scaleX: scale, y: scale)
         }
     }
+
+    private static let selectedScale: CGFloat = 1.25
 
     private func applyTitle(to button: UIButton, at index: Int, magnified: Bool) {
         guard index < days.count else { return }
         let day = days[index]
 
+        // All buttons render their title at the same base font. The visual
+        // magnification on the selected day is provided by a CGAffineTransform
+        // on the button itself (see updateButtonMagnification) — not by
+        // swapping fonts. This keeps UIButton.Configuration's layout stable
+        // (no "Fr 17" truncation) and avoids the .fillProportionally
+        // reflow that made neighbors "fly" on tap.
         let baseFont = UIFont.preferredFont(forTextStyle: .caption2)
-        let font: UIFont
-        if magnified {
-            // Noticeable size jump + semibold weight so the selected day
-            // reads as clearly magnified inside the pill. Works in tandem
-            // with the stackView's .fillProportionally distribution — the
-            // magnified button claims more horizontal room, so "Wed" etc.
-            // don't wrap to two lines.
-            let bumped = UIFont.systemFont(
-                ofSize: baseFont.pointSize + 6,
-                weight: .semibold
-            )
-            font = UIFontMetrics(forTextStyle: .caption2)
-                .scaledFont(for: bumped, maximumPointSize: 26)
-        } else {
-            font = UIFontMetrics(forTextStyle: .caption2)
-                .scaledFont(for: baseFont, maximumPointSize: 18)
-        }
+        let font = UIFontMetrics(forTextStyle: .caption2)
+            .scaledFont(for: baseFont, maximumPointSize: 18)
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
@@ -338,7 +335,9 @@ public final class WeekdayStripView: UIView {
         let attributedTitle = NSMutableAttributedString(
             string: "\(day.symbol)\n\(day.shortLabel)",
             attributes: [
-                .font: font,
+                .font: magnified
+                    ? (UIFont(descriptor: font.fontDescriptor.withSymbolicTraits(.traitBold) ?? font.fontDescriptor, size: 0))
+                    : font,
                 .paragraphStyle: paragraphStyle,
                 .foregroundColor: UIColor.label
             ]
@@ -360,25 +359,25 @@ public final class WeekdayStripView: UIView {
         stackView.layoutIfNeeded()
         blurView.contentView.layoutIfNeeded()
 
-        // Build a content rect that tightly wraps the selected-day label
-        // plus the dot if this day shows one. The label's intrinsic size
-        // already reflects the magnified font (since applyTitle bumped the
-        // font for the selected button), so no extra scaling factor here.
+        // Build a content rect that wraps the selected-day label scaled to
+        // match the button's CGAffineTransform magnification. Since button
+        // transform is visual-only, button.frame stays at the equal-width
+        // slice — the pill needs to be explicitly sized for the scaled
+        // rendering so it visually hugs the magnified content.
         let labelSize = button.titleLabel?.intrinsicContentSize ?? .zero
+        let magnified = labelSize.applying(
+            CGAffineTransform(scaleX: Self.selectedScale, y: Self.selectedScale)
+        )
 
         let horizontalPadding: CGFloat = 14
         let verticalPadding: CGFloat = 10
         let dotExtension: CGFloat = 16 // space for dot + gap when visible
 
-        var pillWidth = labelSize.width + horizontalPadding * 2
-        var pillHeight = labelSize.height + verticalPadding * 2
+        let pillWidth = magnified.width + horizontalPadding * 2
+        var pillHeight = magnified.height + verticalPadding * 2
         if index < dotViews.count, !dotViews[index].isHidden {
-            pillHeight += dotExtension
+            pillHeight += dotExtension * Self.selectedScale
         }
-        // Cap width/height to the button cell so the pill never spills into
-        // neighbors when strip width is tight.
-        pillWidth = min(pillWidth, button.frame.width - 4)
-        pillHeight = min(pillHeight, button.frame.height - 4)
 
         let buttonRectInParent = blurView.contentView.convert(button.frame, from: stackView)
         let targetFrame = CGRect(

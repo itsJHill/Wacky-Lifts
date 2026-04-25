@@ -222,23 +222,19 @@ final class ScheduleWorkoutCell: UITableViewCell {
 
     // MARK: - Weight Formatting
 
-    private func formatWeight(_ weight: Double) -> String {
-        if weight.truncatingRemainder(dividingBy: 1) == 0 {
-            return String(format: "%.0f", weight)
-        }
-        return String(format: "%.1f", weight)
+    private func displayWeight(_ weight: Double, for exercise: WorkoutTemplate.Exercise) -> String {
+        weightLogStore.displayWeight(weight, for: exercise.exerciseId, unit: weightLogStore.preferredUnit)
     }
 
-    private func weightSummaryText(for weights: [Double]) -> String {
-        let unit = weightLogStore.preferredUnit.symbol
-        guard !weights.isEmpty else { return "0 \(unit)" }
+    private func weightSummaryText(for weights: [Double], exercise: WorkoutTemplate.Exercise) -> String {
+        guard !weights.isEmpty else { return displayWeight(0, for: exercise) }
 
         let allSame = Set(weights).count == 1
         if allSame {
-            return "\(weights.count) × \(formatWeight(weights[0])) \(unit)"
+            return "\(weights.count) × \(displayWeight(weights[0], for: exercise))"
         } else {
-            let parts = weights.map { formatWeight($0) }
-            return parts.joined(separator: " → ") + " \(unit)"
+            let parts = weights.map { displayWeight($0, for: exercise) }
+            return parts.joined(separator: " → ")
         }
     }
 
@@ -272,8 +268,8 @@ final class ScheduleWorkoutCell: UITableViewCell {
         // Build exercise text
         let isBodyweightMachine = exercise.machineId == WeightMachine.bodyweightId
         var exerciseText = "\(exercise.name) — \(exercise.detailSummary)"
-        if !isBodyweightMachine, let pr = weightLogStore.personalRecord(for: exercise.exerciseId), pr.weight > 0 {
-            exerciseText += " • PR: \(formatWeight(pr.weight)) \(weightLogStore.preferredUnit.symbol)"
+        if !isBodyweightMachine, let pr = weightLogStore.personalRecord(for: exercise.exerciseId), pr.weight != 0 {
+            exerciseText += " • PR: \(displayWeight(pr.weight, for: exercise))"
         }
         label.text = exerciseText
 
@@ -404,7 +400,7 @@ final class ScheduleWorkoutCell: UITableViewCell {
 
         // Show per-set PR trophies if this exercise already has a PR logged
         if log?.isPersonalRecord == true {
-            updateSetPRIndicators(exerciseId: exercise.id, weights: weights, isPR: true)
+            updateSetPRIndicators(containerKey: exercise.id, exerciseId: exercise.exerciseId, weights: weights, isPR: true)
         }
 
         return sectionStack
@@ -431,7 +427,7 @@ final class ScheduleWorkoutCell: UITableViewCell {
         summaryLabel.translatesAutoresizingMaskIntoConstraints = false
         summaryLabel.font = .preferredFont(forTextStyle: .caption1)
         summaryLabel.textColor = .secondaryLabel
-        summaryLabel.text = weightSummaryText(for: weights)
+        summaryLabel.text = weightSummaryText(for: weights, exercise: exercise)
         summaryLabel.tag = 101
 
         // Confirm button
@@ -541,7 +537,7 @@ final class ScheduleWorkoutCell: UITableViewCell {
         weightLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
         weightLabel.textColor = .label
         weightLabel.textAlignment = .center
-        weightLabel.text = "\(formatWeight(weight)) \(weightLogStore.preferredUnit.symbol)"
+        weightLabel.text = displayWeight(weight, for: exercise)
         weightLabel.tag = 200 + setIndex // tag for updating
 
         let plusButton = UIButton(type: .system)
@@ -738,10 +734,10 @@ final class ScheduleWorkoutCell: UITableViewCell {
 
     @objc private func setMinusTapped(_ sender: UIButton) {
         guard let parts = parseSetButtonId(sender.accessibilityIdentifier, prefix: "minus_"),
-              var weights = editingSetWeights[parts.exerciseId] else { return }
+              var weights = editingSetWeights[parts.exerciseId],
+              let exercise = workout?.exercises.first(where: { $0.id == parts.exerciseId }) else { return }
 
-        let exercise = workout?.exercises.first { $0.id == parts.exerciseId }
-        if let machineId = exercise?.machineId,
+        if let machineId = exercise.machineId,
            let machine = MachineStore.shared.machine(for: machineId) {
             weights[parts.setIndex] = machine.incrementDown(from: weights[parts.setIndex])
         } else {
@@ -751,16 +747,16 @@ final class ScheduleWorkoutCell: UITableViewCell {
         editingSetWeights[parts.exerciseId] = weights
         HapticManager.shared.light()
 
-        updateSetWeightLabel(sender: sender, weight: weights[parts.setIndex])
-        updateSummaryLabel(exerciseId: parts.exerciseId, weights: weights)
+        updateSetWeightLabel(sender: sender, weight: weights[parts.setIndex], exercise: exercise)
+        updateSummaryLabel(exercise: exercise, weights: weights)
     }
 
     @objc private func setPlusTapped(_ sender: UIButton) {
         guard let parts = parseSetButtonId(sender.accessibilityIdentifier, prefix: "plus_"),
-              var weights = editingSetWeights[parts.exerciseId] else { return }
+              var weights = editingSetWeights[parts.exerciseId],
+              let exercise = workout?.exercises.first(where: { $0.id == parts.exerciseId }) else { return }
 
-        let exercise = workout?.exercises.first { $0.id == parts.exerciseId }
-        if let machineId = exercise?.machineId,
+        if let machineId = exercise.machineId,
            let machine = MachineStore.shared.machine(for: machineId) {
             weights[parts.setIndex] = machine.incrementUp(from: weights[parts.setIndex])
         } else {
@@ -770,8 +766,8 @@ final class ScheduleWorkoutCell: UITableViewCell {
         editingSetWeights[parts.exerciseId] = weights
         HapticManager.shared.light()
 
-        updateSetWeightLabel(sender: sender, weight: weights[parts.setIndex])
-        updateSummaryLabel(exerciseId: parts.exerciseId, weights: weights)
+        updateSetWeightLabel(sender: sender, weight: weights[parts.setIndex], exercise: exercise)
+        updateSummaryLabel(exercise: exercise, weights: weights)
     }
 
     @objc private func addSetTapped(_ sender: UIButton) {
@@ -795,7 +791,7 @@ final class ScheduleWorkoutCell: UITableViewCell {
         let addSetButtonIndex = setsContainer.arrangedSubviews.count - 1
         setsContainer.insertArrangedSubview(setRow, at: addSetButtonIndex)
 
-        updateSummaryLabel(exerciseId: exerciseId, weights: weights)
+        updateSummaryLabel(exercise: exercise, weights: weights)
         delegate?.scheduleWorkoutCellNeedsResize(self)
     }
 
@@ -828,7 +824,7 @@ final class ScheduleWorkoutCell: UITableViewCell {
             setsContainer.insertArrangedSubview(setRow, at: i)
         }
 
-        updateSummaryLabel(exerciseId: parts.exerciseId, weights: weights)
+        updateSummaryLabel(exercise: exercise, weights: weights)
         delegate?.scheduleWorkoutCellNeedsResize(self)
     }
 
@@ -859,8 +855,8 @@ final class ScheduleWorkoutCell: UITableViewCell {
             }
         }
 
-        // Show per-set PR trophies on the max-weight set(s)
-        updateSetPRIndicators(exerciseId: exerciseId, weights: weights, isPR: isPR)
+        // Show per-set PR trophies on the best-weight set(s) for this exercise
+        updateSetPRIndicators(containerKey: exerciseId, exerciseId: exercise.exerciseId, weights: weights, isPR: isPR)
 
         // Auto-collapse after confirming
         if expandedExercises.contains(exerciseId) {
@@ -891,40 +887,46 @@ final class ScheduleWorkoutCell: UITableViewCell {
         return SetButtonParts(exerciseId: exerciseId, setIndex: setIndex)
     }
 
-    private func updateSetWeightLabel(sender: UIButton, weight: Double) {
+    private func updateSetWeightLabel(sender: UIButton, weight: Double, exercise: WorkoutTemplate.Exercise?) {
         // The weight label is a sibling of the button in the same container
         guard let container = sender.superview else { return }
         for subview in container.subviews {
             if let label = subview as? UILabel, label.font == .monospacedDigitSystemFont(ofSize: 14, weight: .semibold) {
-                label.text = "\(formatWeight(weight)) \(weightLogStore.preferredUnit.symbol)"
+                if let exercise {
+                    label.text = displayWeight(weight, for: exercise)
+                } else {
+                    label.text = weightLogStore.displayWeight(weight, for: UUID(), unit: weightLogStore.preferredUnit)
+                }
                 break
             }
         }
     }
 
-    /// Show/hide per-set PR trophies. When isPR is true, the trophy appears on every set whose weight equals the max.
-    private func updateSetPRIndicators(exerciseId: UUID, weights: [Double], isPR: Bool) {
-        guard let setsContainer = setRowStacks[exerciseId] else { return }
-        let maxWeight = weights.max() ?? 0
+    /// Show/hide per-set PR trophies. When isPR is true, the trophy appears on every set whose weight equals the best.
+    /// - Parameters:
+    ///   - containerKey: the exercise.id used as the key in setRowStacks
+    ///   - exerciseId: the exercise.exerciseId (library ID) used for assisted-aware PR comparison
+    private func updateSetPRIndicators(containerKey: UUID, exerciseId: UUID, weights: [Double], isPR: Bool) {
+        guard let setsContainer = setRowStacks[containerKey] else { return }
+        let bestWeight = weightLogStore.bestWeight(from: weights, for: exerciseId)
 
         for (index, view) in setsContainer.arrangedSubviews.enumerated() {
-            // Skip the "+ Add Set" button row at the end
             guard index < weights.count else { break }
             if let trophy = view.viewWithTag(Self.prTrophyTagBase + index) as? UIImageView {
-                trophy.isHidden = !(isPR && weights[index] == maxWeight)
+                trophy.isHidden = !(isPR && weights[index] == bestWeight)
             }
         }
     }
 
-    private func updateSummaryLabel(exerciseId: UUID, weights: [Double]) {
+    private func updateSummaryLabel(exercise: WorkoutTemplate.Exercise, weights: [Double]) {
         // Find the summary row for this exercise and update the label
-        guard let setsContainer = setRowStacks[exerciseId],
+        guard let setsContainer = setRowStacks[exercise.id],
               let sectionStack = setsContainer.superview as? UIStackView else { return }
 
         for view in sectionStack.arrangedSubviews {
-            if view.accessibilityIdentifier == "summary_\(exerciseId.uuidString)",
+            if view.accessibilityIdentifier == "summary_\(exercise.id.uuidString)",
                let label = view.viewWithTag(101) as? UILabel {
-                label.text = weightSummaryText(for: weights)
+                label.text = weightSummaryText(for: weights, exercise: exercise)
                 break
             }
         }

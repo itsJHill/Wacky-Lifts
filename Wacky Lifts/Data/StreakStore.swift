@@ -149,15 +149,7 @@ final class StreakStore {
     }
 
     private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    private static let weekFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-'W'ww"
-        return formatter
+        AppDateCoding.makeDateKeyFormatter()
     }()
 
     private init() {
@@ -234,7 +226,7 @@ final class StreakStore {
         var rebuilt: [String: Int] = [:]
         for dateString in countedWorkoutDates {
             guard let date = Self.dateFormatter.date(from: dateString) else { continue }
-            let weekString = Self.weekFormatter.string(from: date)
+            let weekString = AppDateCoding.weekIdentifier(for: date)
             rebuilt[weekString, default: 0] += 1
         }
         if rebuilt != weeklyWorkouts {
@@ -257,10 +249,7 @@ final class StreakStore {
             return
         }
 
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let lastDay = calendar.startOfDay(for: lastDate)
-        let daysDifference = calendar.dateComponents([.day], from: lastDay, to: today).day ?? 0
+        let daysDifference = AppDateCoding.daysBetween(lastDate, and: Date())
 
         if daysDifference > 1 {
             currentStreak = 0
@@ -273,13 +262,7 @@ final class StreakStore {
             return
         }
 
-        let calendar = Calendar.current
-        let currentWeek = calendar.component(.weekOfYear, from: Date())
-        let currentYear = calendar.component(.yearForWeekOfYear, from: Date())
-        let lastWeek = calendar.component(.weekOfYear, from: lastDate)
-        let lastYear = calendar.component(.yearForWeekOfYear, from: lastDate)
-
-        let weeksDifference = (currentYear - lastYear) * 52 + (currentWeek - lastWeek)
+        let weeksDifference = AppDateCoding.weeksBetween(lastDate, and: Date())
 
         if weeksDifference > 1 {
             currentStreak = 0
@@ -288,7 +271,7 @@ final class StreakStore {
 
     func recordExerciseCompletion(on date: Date) {
         let dateString = Self.dateFormatter.string(from: date)
-        let weekString = Self.weekFormatter.string(from: date)
+        let weekString = AppDateCoding.weekIdentifier(for: date)
         let wasNewDayForStreak = !countedActivityDates.contains(dateString)
 
         activeDates.insert(dateString)
@@ -321,7 +304,7 @@ final class StreakStore {
 
     func recordWorkoutCompletion(on date: Date) {
         let dateString = Self.dateFormatter.string(from: date)
-        let weekString = Self.weekFormatter.string(from: date)
+        let weekString = AppDateCoding.weekIdentifier(for: date)
         let wasNewDayForStreak = !countedWorkoutDates.contains(dateString)
 
         workoutDates.insert(dateString)
@@ -345,7 +328,7 @@ final class StreakStore {
 
     func recordWorkoutUncompletion(on date: Date, removeWorkoutDate: Bool = false) {
         let dateString = Self.dateFormatter.string(from: date)
-        let weekString = Self.weekFormatter.string(from: date)
+        let weekString = AppDateCoding.weekIdentifier(for: date)
         totalCompletedWorkouts = max(0, totalCompletedWorkouts - 1)
 
         if countedWorkoutDates.remove(dateString) != nil {
@@ -386,7 +369,7 @@ final class StreakStore {
             let dateString = Self.dateFormatter.string(from: date)
             workoutDates.remove(dateString)
             if countedWorkoutDates.remove(dateString) != nil {
-                let weekString = Self.weekFormatter.string(from: date)
+                let weekString = AppDateCoding.weekIdentifier(for: date)
                 if let currentCount = weeklyWorkouts[weekString], currentCount > 0 {
                     weeklyWorkouts[weekString] = currentCount - 1
                 }
@@ -399,7 +382,7 @@ final class StreakStore {
         let dateString = Self.dateFormatter.string(from: date)
         if workoutDates.remove(dateString) != nil {
             if countedWorkoutDates.remove(dateString) != nil {
-                let weekString = Self.weekFormatter.string(from: date)
+                let weekString = AppDateCoding.weekIdentifier(for: date)
                 if let currentCount = weeklyWorkouts[weekString], currentCount > 0 {
                     weeklyWorkouts[weekString] = currentCount - 1
                 }
@@ -409,12 +392,8 @@ final class StreakStore {
     }
 
     private func updateDayStreak(for date: Date) {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: date)
-
         if let lastDate = lastActivityDate {
-            let lastDay = calendar.startOfDay(for: lastDate)
-            let daysDifference = calendar.dateComponents([.day], from: lastDay, to: today).day ?? 0
+            let daysDifference = AppDateCoding.daysBetween(lastDate, and: date)
 
             if daysDifference == 0 {
                 // Same day, streak unchanged
@@ -433,15 +412,8 @@ final class StreakStore {
     }
 
     private func updateWeekStreak(for date: Date) {
-        let calendar = Calendar.current
-
         if let lastDate = lastActivityDate {
-            let currentWeek = calendar.component(.weekOfYear, from: date)
-            let currentYear = calendar.component(.yearForWeekOfYear, from: date)
-            let lastWeek = calendar.component(.weekOfYear, from: lastDate)
-            let lastYear = calendar.component(.yearForWeekOfYear, from: lastDate)
-
-            let weeksDifference = (currentYear - lastYear) * 52 + (currentWeek - lastWeek)
+            let weeksDifference = AppDateCoding.weeksBetween(lastDate, and: date)
 
             if weeksDifference == 0 {
                 // Same week, streak unchanged
@@ -464,12 +436,12 @@ final class StreakStore {
     }
 
     var activeDaysThisYear: Int {
-        let yearPrefix = String(Calendar.current.component(.year, from: Date()))
+        let yearPrefix = String(Self.dateFormatter.string(from: Date()).prefix(4))
         return activeDates.filter { $0.hasPrefix(yearPrefix) }.count
     }
 
     var completedExercisesThisYear: Int {
-        let yearPrefix = String(Calendar.current.component(.year, from: Date()))
+        let yearPrefix = String(Self.dateFormatter.string(from: Date()).prefix(4))
         return exerciseCountsByDate.filter { $0.key.hasPrefix(yearPrefix) }.values.reduce(0, +)
     }
 
@@ -488,7 +460,7 @@ final class StreakStore {
     }
 
     var currentWeekWorkoutCount: Int {
-        let weekString = Self.weekFormatter.string(from: Date())
+        let weekString = AppDateCoding.weekIdentifier(for: Date())
         return max(0, weeklyWorkouts[weekString] ?? 0)
     }
 
@@ -512,7 +484,7 @@ final class StreakStore {
 
     /// Get all dates with activity in a given month
     func activityDates(in month: Date) -> [Date] {
-        let calendar = Calendar.current
+        let calendar = AppDateCoding.calendar
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
             return []
         }
@@ -525,7 +497,7 @@ final class StreakStore {
 
     /// Get all dates with completed workouts in a given month
     func workoutDates(in month: Date) -> [Date] {
-        let calendar = Calendar.current
+        let calendar = AppDateCoding.calendar
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
             return []
         }

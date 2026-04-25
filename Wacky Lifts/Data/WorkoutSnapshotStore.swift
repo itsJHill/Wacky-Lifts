@@ -14,9 +14,7 @@ final class WorkoutSnapshotStore {
     }
 
     private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
+        AppDateCoding.makeDateKeyFormatter()
     }()
 
     private init() {
@@ -111,7 +109,7 @@ final class WorkoutSnapshotStore {
     // MARK: - Cleanup (3-month retention, weekly check)
 
     private func cleanupOldSnapshotsIfNeeded() {
-        let calendar = Calendar.current
+        let calendar = AppDateCoding.calendar
         let today = Date()
 
         if let lastCleanup = userDefaults.object(forKey: lastCleanupKey) as? Date,

@@ -387,7 +387,9 @@ final class WorkoutsViewController: UIViewController {
                 details.append(machine.name)
             }
             if let pr = self?.weightLogStore.personalRecord(for: exercise.id) {
-                details.append("PR: \(Self.formatWeight(pr.weight)) \(pr.unit.symbol)")
+                let display = self?.weightLogStore.displayWeight(pr.weight, for: exercise.id, unit: pr.unit)
+                    ?? "\(Self.formatWeight(pr.weight)) \(pr.unit.symbol)"
+                details.append("PR: \(display)")
             }
             content.secondaryText = details.isEmpty ? nil : details.joined(separator: " • ")
 

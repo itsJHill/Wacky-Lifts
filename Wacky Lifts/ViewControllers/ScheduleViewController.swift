@@ -13,7 +13,7 @@ final class ScheduleViewController: UIViewController {
     private let weightLogStore = WeightLogStore.shared
     private let libraryStore = WorkoutLibraryStore.shared
     private let snapshotStore = WorkoutSnapshotStore.shared
-    private let isoCalendar = Calendar(identifier: .iso8601)
+    private let isoCalendar = AppDateCoding.calendar
 
     private var days: [WeekdayStripView.Day] = []
     private var weekdays: [Weekday] = [
@@ -1009,7 +1009,7 @@ extension ScheduleViewController: ScheduleWorkoutCellDelegate {
         for exercise: WorkoutTemplate.Exercise,
         in workout: WorkoutTemplate
     ) -> Bool {
-        let weight = setWeights.max() ?? 0
+        let weight = weightLogStore.bestWeight(from: setWeights, for: exercise.exerciseId)
 
         // Only check for PR if user actually modified the weight
         let isPR = wasModified && weightLogStore.isPersonalRecord(exerciseId: exercise.exerciseId, weight: weight)

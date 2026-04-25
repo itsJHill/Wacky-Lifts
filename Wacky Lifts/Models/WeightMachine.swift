@@ -1,10 +1,39 @@
 import Foundation
 
+enum WeightProgressionKind: String, Codable, CaseIterable, Sendable {
+    case higherIsBetter
+    case lowerIsBetter
+
+    var title: String {
+        switch self {
+        case .higherIsBetter: return "Higher weight is better"
+        case .lowerIsBetter: return "Lower assistance is better"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .higherIsBetter: return "Higher Weight"
+        case .lowerIsBetter: return "Lower Assistance"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .higherIsBetter:
+            return "PRs improve as weight increases."
+        case .lowerIsBetter:
+            return "For assisted workouts. PRs improve as assistance decreases; Unassisted is best."
+        }
+    }
+}
+
 struct WeightMachine: Identifiable, Hashable, Sendable {
     let id: UUID
     var name: String
     var weights: [Double]  // sorted ascending list of valid weight positions
     var order: Int
+    var progressionKind: WeightProgressionKind
 
     // MARK: - Well-Known IDs
 
@@ -12,6 +41,21 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
     static let standardDumbbellsId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
     static let standardCableMachineId = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
     static let bodyweightId = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
+    static let unassistedValue = -1.0
+
+    init(
+        id: UUID,
+        name: String,
+        weights: [Double],
+        order: Int,
+        progressionKind: WeightProgressionKind = .higherIsBetter
+    ) {
+        self.id = id
+        self.name = name
+        self.weights = weights.filter { $0 > 0 }.sorted()
+        self.order = order
+        self.progressionKind = progressionKind
+    }
 
     // MARK: - Weight Array Generators
 
@@ -73,6 +117,11 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
     ]
 
     var isBodyweight: Bool { id == Self.bodyweightId }
+    var isAssisted: Bool { progressionKind == .lowerIsBetter }
+
+    var selectableWeights: [Double] {
+        isAssisted ? [Self.unassistedValue] + weights : weights
+    }
 
     // MARK: - Display
 
@@ -87,7 +136,22 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
             ? String(format: "%.0f", first) : String(format: "%.1f", first)
         let l = last.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", last) : String(format: "%.1f", last)
-        return "\(f)–\(l) lbs (\(weights.count) positions)"
+        let range = "\(f)–\(l) lbs (\(weights.count) positions)"
+        return isAssisted ? "\(range), Unassisted included" : range
+    }
+
+    func displayText(for weight: Double, unit: WeightUnit) -> String {
+        if isAssisted && weight < 0 {
+            return "Unassisted"
+        }
+        let formatted = weight.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", weight)
+            : String(format: "%.1f", weight)
+        return "\(formatted) \(unit.symbol)"
+    }
+
+    func isValidLogWeight(_ weight: Double) -> Bool {
+        isAssisted ? weight != 0 : weight > 0
     }
 
     // MARK: - Increment Logic
@@ -95,6 +159,9 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
     /// Returns the next weight up from the given weight using the weights array.
     func incrementUp(from weight: Double) -> Double {
         guard !weights.isEmpty else { return weight }
+        if isAssisted && weight < 0 {
+            return weights.first ?? weight
+        }
         // Find first element greater than current weight
         for w in weights {
             if w > weight + 0.001 {
@@ -108,6 +175,12 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
     /// Returns the next weight down from the given weight using the weights array.
     func incrementDown(from weight: Double) -> Double {
         guard !weights.isEmpty else { return weight }
+        if isAssisted && weight <= (weights.first ?? 0) {
+            return Self.unassistedValue
+        }
+        if isAssisted && weight < 0 {
+            return Self.unassistedValue
+        }
         // Find last element less than current weight
         var result = weights.first ?? 0
         for w in weights {
@@ -117,7 +190,7 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
                 break
             }
         }
-        return weight > weights.first ?? 0 ? result : (weights.first ?? 0)
+        return weight > (weights.first ?? 0) ? result : (weights.first ?? 0)
     }
 }
 
@@ -125,7 +198,7 @@ struct WeightMachine: Identifiable, Hashable, Sendable {
 
 extension WeightMachine: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, name, weights, order
+        case id, name, weights, order, progressionKind
         // Legacy keys for decoding old format
         case primaryStep, secondaryStep
     }
@@ -135,9 +208,10 @@ extension WeightMachine: Codable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         order = try container.decode(Int.self, forKey: .order)
+        progressionKind = try container.decodeIfPresent(WeightProgressionKind.self, forKey: .progressionKind) ?? .higherIsBetter
 
         if let w = try container.decodeIfPresent([Double].self, forKey: .weights) {
-            weights = w
+            weights = w.filter { $0 > 0 }.sorted()
         } else {
             // Migrate from old format
             let primaryStep = try container.decodeIfPresent(Double.self, forKey: .primaryStep) ?? 5
@@ -160,5 +234,6 @@ extension WeightMachine: Codable {
         try container.encode(name, forKey: .name)
         try container.encode(weights, forKey: .weights)
         try container.encode(order, forKey: .order)
+        try container.encode(progressionKind, forKey: .progressionKind)
     }
 }

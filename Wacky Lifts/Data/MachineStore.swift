@@ -46,23 +46,44 @@ final class MachineStore {
 
     // MARK: - CRUD
 
-    func add(name: String, weights: [Double]) {
+    func add(
+        name: String,
+        weights: [Double],
+        progressionKind: WeightProgressionKind = .higherIsBetter
+    ) {
         let maxOrder = machines.map(\.order).max() ?? -1
         let machine = WeightMachine(
             id: UUID(),
             name: name,
             weights: weights,
-            order: maxOrder + 1
+            order: maxOrder + 1,
+            progressionKind: progressionKind
         )
         machines.append(machine)
     }
 
-    func update(id: UUID, name: String, weights: [Double]) {
+    func update(
+        id: UUID,
+        name: String,
+        weights: [Double],
+        progressionKind: WeightProgressionKind? = nil
+    ) {
         guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        let oldProgressionKind = machines[index].progressionKind
         var updated = machines[index]
         updated.name = name
         updated.weights = weights
+        if let progressionKind {
+            updated.progressionKind = progressionKind
+        }
         machines[index] = updated
+
+        if updated.progressionKind != oldProgressionKind {
+            let affectedExerciseIds = ExerciseStore.shared.exercises
+                .filter { $0.machineId == id }
+                .map(\.id)
+            WeightLogStore.shared.recalculatePersonalRecords(for: Set(affectedExerciseIds))
+        }
     }
 
     func delete(id: UUID) {

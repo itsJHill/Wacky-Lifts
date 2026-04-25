@@ -62,10 +62,8 @@ extension AllPRsViewController: UITableViewDataSource {
         var content = UIListContentConfiguration.subtitleCell()
         content.text = pr.exerciseName
 
-        let weightText = pr.weight.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", pr.weight)
-            : String(format: "%.1f", pr.weight)
-        content.secondaryText = "\(weightText) \(pr.unit.symbol) • \(Self.dateFormatter.string(from: pr.date))"
+        let weightText = weightLogStore.displayWeight(pr.weight, for: pr.exerciseId, unit: pr.unit)
+        content.secondaryText = "\(weightText) • \(Self.dateFormatter.string(from: pr.date))"
 
         content.image = UIImage(systemName: "trophy.fill")
         content.imageProperties.tintColor = .systemYellow

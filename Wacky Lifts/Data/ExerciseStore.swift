@@ -69,9 +69,13 @@ final class ExerciseStore {
 
     func update(_ exercise: Exercise) {
         guard let index = exercises.firstIndex(where: { $0.id == exercise.id }) else { return }
+        let oldMachineId = exercises[index].machineId
         exercises[index] = exercise
         save()
         notifyChange()
+        if oldMachineId != exercise.machineId {
+            WeightLogStore.shared.recalculatePersonalRecords(for: [exercise.id])
+        }
     }
 
     func delete(id: UUID) {

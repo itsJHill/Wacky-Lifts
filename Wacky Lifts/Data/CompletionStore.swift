@@ -22,9 +22,7 @@ final class CompletionStore {
     }
 
     private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
+        AppDateCoding.makeDateKeyFormatter()
     }()
 
     private struct CompletionKeyParts {
@@ -363,7 +361,7 @@ final class CompletionStore {
     }
 
     var completedExercisesThisYear: Int {
-        let yearPrefix = String(Calendar.current.component(.year, from: Date()))
+        let yearPrefix = String(Self.dateFormatter.string(from: Date()).prefix(4))
         return completions.filter { $0.hasPrefix(yearPrefix) }.count
     }
 

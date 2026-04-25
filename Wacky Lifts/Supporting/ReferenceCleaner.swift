@@ -92,12 +92,13 @@ enum ReferenceCleaner {
     /// workouts and history continue to resolve.
     static func onMachineDeleted(_ machineId: UUID) {
         let exerciseStore = ExerciseStore.shared
-        let affected = exerciseStore.exercises.contains { $0.machineId == machineId }
-        guard affected else { return }
+        let affectedExerciseIds = Set(exerciseStore.exercises.filter { $0.machineId == machineId }.map(\.id))
+        guard !affectedExerciseIds.isEmpty else { return }
         let updated = exerciseStore.exercises.map { ex -> Exercise in
             guard ex.machineId == machineId else { return ex }
             return Exercise(id: ex.id, name: ex.name, machineId: nil)
         }
         exerciseStore.replaceAll(with: updated)
+        WeightLogStore.shared.recalculatePersonalRecords(for: affectedExerciseIds)
     }
 }
