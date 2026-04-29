@@ -19,6 +19,8 @@ final class DataBackupManager {
         "personal_records",
         "prior_personal_records",
         "workout_snapshots",
+        "saved_programs",
+        "completed_programs",
     ]
 
     /// Keys storing simple string arrays:
@@ -37,6 +39,7 @@ final class DataBackupManager {
         "preferred_weight_unit",
         "schedule_week_identifier",
         "user_display_name",
+        "active_program_id",
     ]
 
     /// Keys storing integer values:
@@ -61,6 +64,7 @@ final class DataBackupManager {
         "last_activity_date",
         "weight_logs_last_cleanup",
         "workout_snapshots_last_cleanup",
+        "active_program_start_date",
     ]
 
     /// Keys storing [String: Int] dictionaries:
@@ -186,6 +190,7 @@ final class DataBackupManager {
         ExerciseStore.shared.reloadFromDisk()
         WorkoutLibraryStore.shared.reloadFromDisk()
         ScheduleStore.shared.reloadFromDisk()
+        ProgramStore.shared.reloadFromDisk()
         CompletionStore.shared.reloadFromDisk()
         WeightLogStore.shared.reloadFromDisk()
         WorkoutSnapshotStore.shared.reloadFromDisk()
@@ -287,7 +292,7 @@ final class DataBackupManager {
         var errorDescription: String? {
             switch self {
             case .invalidFormat:
-                return "The backup file is not a valid Wacky Lifts backup."
+                return "The backup file is not a valid Lift by jordan backup."
             case .unsupportedVersion:
                 return "This backup was created by a newer version of the app."
             }

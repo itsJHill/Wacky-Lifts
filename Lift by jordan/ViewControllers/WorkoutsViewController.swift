@@ -8,10 +8,16 @@ final class WorkoutsViewController: UIViewController {
     // MARK: - Segmented Control
 
     private lazy var segmentedControl: UISegmentedControl = {
-        let sc = UISegmentedControl(items: ["Workouts", "Exercises"])
+        let sc = UISegmentedControl(items: ["Workouts", "Plans", "Exercises"])
         sc.selectedSegmentIndex = 0
         sc.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
         return sc
+    }()
+
+    private lazy var programListVC: ProgramListViewController = {
+        let vc = ProgramListViewController()
+        vc.delegate = self
+        return vc
     }()
 
     // MARK: - Workouts Pane
@@ -120,6 +126,7 @@ final class WorkoutsViewController: UIViewController {
 
         configureWorkoutsTableView()
         configureWorkoutsDataSource()
+        configureProgramsView()
         configureExercisesTableView()
         configureExercisesDataSource()
 
@@ -127,6 +134,22 @@ final class WorkoutsViewController: UIViewController {
         applyWorkoutsSnapshot()
         applyExercisesSnapshot()
         observeChanges()
+    }
+
+    private func configureProgramsView() {
+        addChild(programListVC)
+        programListVC.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(programListVC.view)
+        programListVC.didMove(toParent: self)
+
+        NSLayoutConstraint.activate([
+            programListVC.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            programListVC.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            programListVC.view.topAnchor.constraint(equalTo: view.topAnchor),
+            programListVC.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        programListVC.view.isHidden = true
     }
 
     deinit {
@@ -137,26 +160,39 @@ final class WorkoutsViewController: UIViewController {
 
     @objc private func segmentChanged() {
         let showWorkouts = segmentedControl.selectedSegmentIndex == 0
+        let showPlans = segmentedControl.selectedSegmentIndex == 1
         workoutsTableView.isHidden = !showWorkouts
-        exercisesTableView.isHidden = showWorkouts
+        programListVC.view.isHidden = !showPlans
+        exercisesTableView.isHidden = !(segmentedControl.selectedSegmentIndex == 2)
         updateNavBarForSegment()
     }
 
     private func updateNavBarForSegment() {
         let showingWorkouts = segmentedControl.selectedSegmentIndex == 0
+        let showingPlans = segmentedControl.selectedSegmentIndex == 1
         // If the user was searching and switched back to Workouts, tear
         // down the search UI cleanly.
-        if showingWorkouts && isSearchingExercises {
+        if (showingWorkouts || showingPlans) && isSearchingExercises {
             exitSearchMode(clearText: true, refreshList: false)
         }
         navigationItem.leftBarButtonItem = nil
-        // Order here is right-to-left: the first item in the array is the
-        // rightmost button. The chevron toggle stays pinned to the far right
-        // so the user can always reach "collapse"; the segment-specific
-        // actions only appear when expanded.
-        let segmentActions: [UIBarButtonItem] = showingWorkouts
-            ? [addWorkoutButton, categoriesButton]
-            : [addExerciseButton, searchExercisesButton]
+
+        let segmentActions: [UIBarButtonItem]
+        if showingWorkouts {
+            segmentActions = [addWorkoutButton, categoriesButton]
+        } else if showingPlans {
+            let addPlanButton = UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: self,
+                action: #selector(addProgramTapped)
+            )
+            addPlanButton.accessibilityLabel = "Add program"
+            segmentActions = [addPlanButton]
+        } else {
+            segmentActions = [addExerciseButton, searchExercisesButton]
+        }
+
         if isActionsExpanded {
             navigationItem.rightBarButtonItems = [actionsToggleButton] + segmentActions
         } else {
@@ -173,14 +209,25 @@ final class WorkoutsViewController: UIViewController {
             ? "Hide actions"
             : "Show actions"
         let showingWorkouts = segmentedControl.selectedSegmentIndex == 0
-        let segmentActions: [UIBarButtonItem] = showingWorkouts
-            ? [addWorkoutButton, categoriesButton]
-            : [addExerciseButton, searchExercisesButton]
+        let showingPlans = segmentedControl.selectedSegmentIndex == 1
+        let segmentActions: [UIBarButtonItem]
+        if showingWorkouts {
+            segmentActions = [addWorkoutButton, categoriesButton]
+        } else if showingPlans {
+            let addPlanButton = UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: self,
+                action: #selector(addProgramTapped)
+            )
+            addPlanButton.accessibilityLabel = "Add program"
+            segmentActions = [addPlanButton]
+        } else {
+            segmentActions = [addExerciseButton, searchExercisesButton]
+        }
         let items: [UIBarButtonItem] = isActionsExpanded
             ? [actionsToggleButton] + segmentActions
             : [actionsToggleButton]
-        // Animated set gives a native slide-in and lets UIKit reflow the
-        // centered titleView to the left as new items take up space.
         navigationItem.setRightBarButtonItems(items, animated: true)
     }
 
@@ -270,6 +317,14 @@ final class WorkoutsViewController: UIViewController {
 
     @objc private func addWorkoutTapped() {
         let editor = WorkoutEditorViewController(mode: .create)
+        editor.delegate = self
+        let nav = UINavigationController(rootViewController: editor)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
+    }
+
+    @objc private func addProgramTapped() {
+        let editor = ProgramEditorViewController(mode: .create)
         editor.delegate = self
         let nav = UINavigationController(rootViewController: editor)
         nav.modalPresentationStyle = .pageSheet
@@ -614,5 +669,39 @@ private final class WorkoutDetailViewController: UIViewController {
             "\(exercise.name) – \(exercise.detailSummary)"
         }.joined(separator: "\n")
         return header + exercises
+    }
+}
+
+// MARK: - ProgramListViewControllerDelegate
+
+extension WorkoutsViewController: ProgramListViewControllerDelegate {
+    func programListDidRequestCreate(_ controller: ProgramListViewController) {
+        addProgramTapped()
+    }
+
+    func programList(_ controller: ProgramListViewController, didSelect program: Program) {
+        let detailVC = ProgramDetailViewController(program: program, startDate: ProgramStore.shared.activeStartDate)
+        navigationController?.pushViewController(detailVC, animated: true)
+    }
+
+    func programList(_ controller: ProgramListViewController, didSelectCompleted completion: ProgramCompletion) {
+        let detailVC = ProgramDetailViewController(completion: completion)
+        navigationController?.pushViewController(detailVC, animated: true)
+    }
+
+    func programList(_ controller: ProgramListViewController, didRequestEdit program: Program) {
+        let editor = ProgramEditorViewController(mode: .edit(program))
+        editor.delegate = self
+        let nav = UINavigationController(rootViewController: editor)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
+    }
+}
+
+// MARK: - ProgramEditorViewControllerDelegate
+
+extension WorkoutsViewController: ProgramEditorViewControllerDelegate {
+    func programEditorDidSave(_ controller: ProgramEditorViewController) {
+        // ProgramListVC auto-reloads via notification
     }
 }

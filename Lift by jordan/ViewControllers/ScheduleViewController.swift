@@ -91,6 +91,19 @@ final class ScheduleViewController: UIViewController {
 
     private let weekStripView = WeekdayStripView()
 
+    private let programBannerLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .footnote)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.backgroundColor = .systemIndigo
+        label.layer.cornerRadius = 6
+        label.layer.masksToBounds = true
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     // MARK: - Paging
 
     private let pagingScrollView: PagingScrollView = {
@@ -182,6 +195,7 @@ final class ScheduleViewController: UIViewController {
         navigationController?.setNavigationBarHidden(true, animated: animated)
         // Refresh from library in case workouts were edited while view was not visible
         store.refreshFromLibrary()
+        updateProgramBanner()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -326,9 +340,9 @@ final class ScheduleViewController: UIViewController {
         headerRow.alignment = .center
         headerRow.distribution = .equalSpacing
 
-        let headerStack = UIStackView(arrangedSubviews: [headerRow, weekStripView])
+        let headerStack = UIStackView(arrangedSubviews: [headerRow, programBannerLabel, weekStripView])
         headerStack.axis = .vertical
-        headerStack.spacing = 12
+        headerStack.spacing = 8
         headerStack.translatesAutoresizingMaskIntoConstraints = false
 
         // Add paging scroll view first (behind everything)
@@ -511,7 +525,7 @@ final class ScheduleViewController: UIViewController {
                     }
                 }
 
-                cell.configure(with: resolved, completions: completions, logs: logs, expandedExercises: self.expandedExercises)
+                cell.configure(with: resolved, completions: completions, logs: logs, expandedExercises: self.expandedExercises, isProgramWorkout: store.isProgramWorkout(workout.id, on: self.weekdays[dayIndex]), programBorderColor: ProgramStore.shared.activeProgram?.color)
                 cell.delegate = self
 
                 cell.backgroundConfiguration = UIBackgroundConfiguration.listCell()
@@ -782,6 +796,12 @@ final class ScheduleViewController: UIViewController {
             name: MachineStore.machinesDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleProgramChange),
+            name: ProgramStore.activeProgramDidChangeNotification,
+            object: nil
+        )
     }
 
     @objc private func handleScheduleChange() {
@@ -816,6 +836,26 @@ final class ScheduleViewController: UIViewController {
         applyAllSnapshots(animated: false)
     }
 
+    @objc private func handleProgramChange() {
+        updateProgramBanner()
+        applyAllSnapshots(animated: false)
+    }
+
+    private func updateProgramBanner() {
+        guard let program = ProgramStore.shared.activeProgram,
+              let startDate = ProgramStore.shared.activeStartDate,
+              let weekNum = ProgramStore.shared.currentWeekNumber() else {
+            programBannerLabel.isHidden = true
+            return
+        }
+
+        let displayWeek = weekNum + 1
+        let totalWeeks = program.weeks.count
+        programBannerLabel.text = "   Week \(displayWeek) of \(totalWeeks) — \(program.name)   "
+        programBannerLabel.backgroundColor = program.color
+        programBannerLabel.isHidden = false
+    }
+
     @objc private func headerLabelTapped() {
         let isoWeekday = isoCalendar.component(.weekday, from: Date())
         let todayWeekday = weekdayFromISO(isoWeekday)
@@ -826,10 +866,23 @@ final class ScheduleViewController: UIViewController {
 
     @objc private func addWorkoutTapped() {
         HapticManager.shared.light()
-        let selectedWorkouts = store.workouts(for: selectedWeekday)
+
+        let programStore = ProgramStore.shared
+        let allWorkouts = store.availableWorkouts
+
+        let preselected: [WorkoutTemplate]
+        if programStore.hasActiveProgram {
+            // Only show extras (non-program workouts) when a program is active
+            let programIds = store.programWorkoutIds[selectedWeekday] ?? []
+            let currentDay = store.workouts(for: selectedWeekday)
+            preselected = currentDay.filter { !programIds.contains($0.id) }
+        } else {
+            preselected = store.workouts(for: selectedWeekday)
+        }
+
         let picker = WorkoutPickerViewController(
-            allWorkouts: store.availableWorkouts,
-            preselected: selectedWorkouts
+            allWorkouts: allWorkouts,
+            preselected: preselected
         )
         picker.delegate = self
         let nav = UINavigationController(rootViewController: picker)
@@ -953,7 +1006,7 @@ extension ScheduleViewController: WorkoutPickerViewControllerDelegate {
     func workoutPicker(
         _ controller: WorkoutPickerViewController, didSelectWorkouts workouts: [WorkoutTemplate]
     ) {
-        store.replace(day: selectedWeekday, with: workouts)
+        store.mergeExtras(day: selectedWeekday, with: workouts)
     }
 }
 

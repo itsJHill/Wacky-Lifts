@@ -310,7 +310,7 @@ final class SettingsViewController: UIViewController {
         let csv = makeCSV(from: logs)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        let fileName = "WackyLifts_History_\(formatter.string(from: Date())).csv"
+        let fileName = "LiftByJordan_History_\(formatter.string(from: Date())).csv"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
@@ -529,7 +529,7 @@ final class SettingsViewController: UIViewController {
             let data = try DataBackupManager.shared.exportBackup()
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
-            let fileName = "WackyLifts_Backup_\(formatter.string(from: Date())).json"
+            let fileName = "LiftByJordan_Backup_\(formatter.string(from: Date())).json"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             try data.write(to: url, options: .atomic)
 

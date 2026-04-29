@@ -10,15 +10,24 @@ final class WorkoutPickerViewController: UIViewController {
     private var selectedWorkoutIDs: Set<UUID>
     weak var delegate: WorkoutPickerViewControllerDelegate?
 
+    /// If true, shows a "Create New Workout" button at the bottom of the list.
+    /// Passed through from the presenting VC, used by ProgramEditor.
+    let allowsCreation: Bool
+
+    /// Carried context so callers can identify which week/day this picker is for.
+    /// Set by the presenting VC. Not used internally; passed back via delegate.
+    var dayContext: (weekIndex: Int, weekday: Weekday)?
+
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<UUID, WorkoutTemplate>!
 
     private let searchController = UISearchController(searchResultsController: nil)
     private var filteredWorkouts: [WorkoutTemplate] = []
 
-    init(allWorkouts: [WorkoutTemplate], preselected: [WorkoutTemplate]) {
+    init(allWorkouts: [WorkoutTemplate], preselected: [WorkoutTemplate], allowsCreation: Bool = false) {
         self.allWorkouts = allWorkouts
         self.selectedWorkoutIDs = Set(preselected.map { $0.id })
+        self.allowsCreation = allowsCreation
         super.init(nibName: nil, bundle: nil)
         self.filteredWorkouts = allWorkouts
     }
@@ -50,6 +59,19 @@ final class WorkoutPickerViewController: UIViewController {
         cancelButton.accessibilityHint = "Dismisses without saving"
         navigationItem.leftBarButtonItem = cancelButton
 
+        var rightItems: [UIBarButtonItem] = []
+
+        if allowsCreation {
+            let createButton = UIBarButtonItem(
+                image: UIImage(systemName: "plus.circle"),
+                style: .plain,
+                target: self,
+                action: #selector(createWorkoutTapped)
+            )
+            createButton.accessibilityLabel = "Create new workout"
+            rightItems.append(createButton)
+        }
+
         let doneButton = UIBarButtonItem(
             title: "Done",
             image: UIImage(systemName: "checkmark.circle.fill"),
@@ -59,7 +81,17 @@ final class WorkoutPickerViewController: UIViewController {
         )
         doneButton.accessibilityLabel = "Done"
         doneButton.accessibilityHint = "Saves selected workouts"
-        navigationItem.rightBarButtonItem = doneButton
+        rightItems.append(doneButton)
+
+        navigationItem.rightBarButtonItems = rightItems
+    }
+
+    @objc private func createWorkoutTapped() {
+        let editor = WorkoutEditorViewController(mode: .create)
+        editor.delegate = self
+        let nav = UINavigationController(rootViewController: editor)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
     }
 
     private func configureSearch() {
@@ -365,4 +397,19 @@ private final class SectionHeaderView: UICollectionReusableView {
     func configure(title: String) {
         titleLabel.text = title
     }
+}
+
+// MARK: - WorkoutEditorViewControllerDelegate
+
+extension WorkoutPickerViewController: WorkoutEditorViewControllerDelegate {
+    func workoutEditorDidSave(_ controller: WorkoutEditorViewController, workout: WorkoutTemplate) {
+        // Auto-select the newly created workout
+        selectedWorkoutIDs.insert(workout.id)
+        // Reload data so the new workout appears in the list
+        filteredWorkouts = WorkoutLibraryStore.shared.templates
+        applySnapshot(animated: true)
+        refreshVisibleSelection()
+    }
+
+    func workoutEditorDidDelete(_ controller: WorkoutEditorViewController, workoutId: WorkoutTemplate.ID) {}
 }

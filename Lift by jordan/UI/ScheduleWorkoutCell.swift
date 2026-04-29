@@ -90,6 +90,14 @@ final class ScheduleWorkoutCell: UITableViewCell {
         return stack
     }()
 
+    private let innerCardView: UIView = {
+        let view = UIView()
+        view.layer.cornerRadius = 12
+        view.layer.masksToBounds = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         setupViews()
@@ -105,6 +113,8 @@ final class ScheduleWorkoutCell: UITableViewCell {
         initialSetWeights.removeAll()
         setRowStacks.removeAll()
         exerciseContainers.removeAll()
+        innerCardView.layer.borderWidth = 0
+        innerCardView.backgroundColor = .clear
     }
 
     private func setupViews() {
@@ -112,7 +122,8 @@ final class ScheduleWorkoutCell: UITableViewCell {
         backgroundColor = .clear
         contentView.backgroundColor = .clear
 
-        contentView.addSubview(containerStack)
+        contentView.addSubview(innerCardView)
+        innerCardView.addSubview(containerStack)
 
         headerView.addSubview(iconImageView)
         headerView.addSubview(titleLabel)
@@ -128,10 +139,15 @@ final class ScheduleWorkoutCell: UITableViewCell {
         containerStack.addArrangedSubview(exercisesStack)
 
         NSLayoutConstraint.activate([
-            containerStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            containerStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            containerStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            containerStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            innerCardView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 7),
+            innerCardView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 7),
+            innerCardView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -7),
+            innerCardView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -7),
+
+            containerStack.topAnchor.constraint(equalTo: innerCardView.topAnchor, constant: 8),
+            containerStack.leadingAnchor.constraint(equalTo: innerCardView.leadingAnchor, constant: 12),
+            containerStack.trailingAnchor.constraint(equalTo: innerCardView.trailingAnchor, constant: -12),
+            containerStack.bottomAnchor.constraint(equalTo: innerCardView.bottomAnchor, constant: -8),
 
             headerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
 
@@ -158,7 +174,7 @@ final class ScheduleWorkoutCell: UITableViewCell {
         progressToTrailingConstraint.isActive = true
     }
 
-    func configure(with workout: WorkoutTemplate, completions: [UUID: Bool], logs: [UUID: ExerciseLog] = [:], expandedExercises: Set<UUID> = []) {
+    func configure(with workout: WorkoutTemplate, completions: [UUID: Bool], logs: [UUID: ExerciseLog] = [:], expandedExercises: Set<UUID> = [], isProgramWorkout: Bool = false, programBorderColor: UIColor? = nil) {
         self.workout = workout
         self.exerciseCompletions = completions
         self.exerciseLogs = logs
@@ -174,9 +190,14 @@ final class ScheduleWorkoutCell: UITableViewCell {
         let completedCount = completions.values.filter { $0 }.count
         let totalCount = workout.exercises.count
         let isFullyCompleted = completedCount == totalCount && totalCount > 0
-
-        // Check if any exercise has a PR
         let hasPR = logs.values.contains { $0.isPersonalRecord }
+
+        innerCardView.backgroundColor = .secondarySystemBackground
+
+        if isProgramWorkout {
+            innerCardView.layer.borderWidth = 3
+            innerCardView.layer.borderColor = (programBorderColor ?? .systemIndigo).cgColor
+        }
 
         if isFullyCompleted {
             if hasPR {
